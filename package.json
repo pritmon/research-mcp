@@ -1,0 +1,35 @@
+{
+  "name": "research-mcp",
+  "version": "1.0.0",
+  "description": "Production-ready MCP server for enterprise research workflows (summarize, search, entities, compare).",
+  "private": true,
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "bin": {
+    "research-mcp": "dist/src/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/index.js",
+    "dev": "node --enable-source-maps --watch dist/src/index.js",
+    "test:tools": "node --enable-source-maps dist/test.js",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@anthropic-ai/sdk": "^0.90.0",
+    "cheerio": "^1.0.0",
+    "he": "^1.2.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/he": "^1.2.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
+
