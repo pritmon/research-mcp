@@ -1,97 +1,131 @@
 # research-mcp
 
-Production-ready **MCP (Model Context Protocol) server** that demonstrates **multi-tool AI agent orchestration** for enterprise research workflows using **TypeScript/Node.js**, the official **`@modelcontextprotocol/sdk`**, and **Claude Sonnet 4**.
+A production-ready **MCP (Model Context Protocol) server** for AI-powered research workflows — summarize URLs, search the web, extract entities, and compare sources, all from any MCP-compatible client like Claude Desktop.
 
-## What it does
+Built with TypeScript, the official [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk), and Claude Sonnet.
 
-This MCP server exposes 4 tools:
+---
 
-- **`summarize_url(url)` → string**: fetches a URL, cleans HTML, and returns a Claude-generated summary (handles redirects/timeouts/non-HTML best-effort).
-- **`search_and_summarize(query, num_results?)` → object**: queries DuckDuckGo Instant Answer API (no key), fetches results in parallel via `Promise.allSettled`, summarizes each page, and returns relevance scores.
-- **`extract_entities(text)` → object**: Claude extracts structured entities with confidence scores plus sentiment and language.
-- **`compare_sources(urls[])` → object**: fetches and summarizes each URL in parallel, then Claude produces a structured comparative analysis.
+## Tools
 
-Operational features:
+| Tool | Description |
+|------|-------------|
+| `summarize_url` | Fetches a URL and returns an AI-generated summary |
+| `search_and_summarize` | Searches DuckDuckGo, fetches results in parallel, summarizes each |
+| `extract_entities` | Extracts people, orgs, locations, concepts, sentiment from text |
+| `compare_sources` | Fetches multiple URLs and produces a structured comparative analysis |
 
-- **stdio transport** (Claude Desktop compatible)
-- **strict TypeScript**
-- **Zod validation** on all tool inputs
-- **timeouts**: web \(10s\), Claude \(30s\)
-- **retries with exponential backoff** on API failures
-- **structured JSON logging to stderr** (stdout reserved for MCP protocol)
+---
 
-## Install / build
+## Requirements
+
+- Node.js >= 18
+- An [Anthropic API key](https://console.anthropic.com)
+
+---
+
+## Installation
 
 ```bash
+git clone https://github.com/pritmon/research-mcp.git
+cd research-mcp
 npm install
 npm run build
 ```
 
-## Claude Desktop config
+---
 
-Add this to your Claude Desktop MCP config:
+## Claude Desktop Setup
+
+Add the following to your Claude Desktop MCP config file:
+
+**Mac:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
     "research-mcp": {
       "command": "node",
-      "args": ["<ABSOLUTE_PATH_TO>/research-mcp/dist/src/index.js"],
+      "args": ["/absolute/path/to/research-mcp/dist/src/index.js"],
       "env": {
-        "ANTHROPIC_API_KEY": "YOUR_KEY_HERE"
+        "ANTHROPIC_API_KEY": "your-api-key-here"
       }
     }
   }
 }
 ```
 
-## Example tool calls
+Then restart Claude Desktop. The 4 research tools will be available automatically.
 
-- Summarize a URL:
-  - `summarize_url({ "url": "https://example.com/report" })`
+---
 
-- Search and summarize:
-  - `search_and_summarize({ "query": "ISO 27001 implementation guidance", "num_results": 3 })`
+## Usage Examples
 
-- Extract entities:
-  - `extract_entities({ "text": "Acme Corp announced a partnership with Globex in Paris..." })`
-
-- Compare sources:
-  - `compare_sources({ "urls": ["https://source-a.com", "https://source-b.com"] })`
-
-## Architecture (ASCII)
-
+**Summarize a URL:**
 ```
-              (Claude Desktop / any MCP client)
-                         |
-                         | stdio (JSON-RPC over stdin/stdout)
-                         v
-                  +-----------------+
-                  |   MCP Server    |
-                  |  src/index.ts   |
-                  +-----------------+
-                   |   |    |    |
-                   |   |    |    +------------------+
-                   |   |    |                       |
-                   v   v    v                       v
-            summarize  search  entities         compare_sources
-           (tool)     (tool)   (tool)             (tool)
-              |          |        |                 |
-              |          |        +--------+        |
-              |          |                 |        |
-              v          v                 v        v
-        utils/fetch  DuckDuckGo API   utils/claude  utils/fetch
-        (timeout,    (instant answer) (retry/timeout)
-         retry,
-         html clean)
-                         |
-                         v
-                   Anthropic API
-                (claude-sonnet-4)
+summarize_url({ "url": "https://example.com/article" })
 ```
 
-## Notes
+**Search and summarize:**
+```
+search_and_summarize({ "query": "climate change 2025", "num_results": 3 })
+```
 
-- Set `ANTHROPIC_API_KEY` in the environment for all Claude-dependent tools.
-- Run `node dist/test.js` (after build) to exercise all tools with real data.
+**Extract entities:**
+```
+extract_entities({ "text": "Anthropic released Claude 4 in San Francisco..." })
+```
 
+**Compare sources:**
+```
+compare_sources({ "urls": ["https://source-a.com", "https://source-b.com"] })
+```
+
+---
+
+## Project Structure
+
+```
+research-mcp/
+├── src/
+│   ├── index.ts          # MCP server entry point
+│   ├── tools/
+│   │   ├── summarize.ts  # summarize_url tool
+│   │   ├── search.ts     # search_and_summarize tool
+│   │   ├── entities.ts   # extract_entities tool
+│   │   └── compare.ts    # compare_sources tool
+│   └── utils/
+│       ├── claude.ts     # Anthropic API client (retries, timeouts)
+│       ├── fetch.ts      # HTTP fetch with timeout and HTML cleaning
+│       └── logger.ts     # Structured JSON logger
+├── test.ts               # End-to-end tool tests
+├── package.json
+└── tsconfig.json
+```
+
+---
+
+## Features
+
+- **stdio transport** — compatible with Claude Desktop and any MCP client
+- **Zod validation** on all tool inputs
+- **Retries with exponential backoff** on API failures
+- **Configurable timeouts** — 10s for web fetches, 30–60s for Claude calls
+- **Structured JSON logging** to stderr (stdout reserved for MCP protocol)
+- **Strict TypeScript** throughout
+
+---
+
+## Development
+
+```bash
+npm run build        # compile TypeScript
+npm run dev          # watch mode
+npm run test:tools   # run end-to-end tool tests
+```
+
+---
+
+## License
+
+MIT
