@@ -1,6 +1,7 @@
 # 🔬 research-mcp
 
 ![Node CI](https://img.shields.io/badge/node%20ci-passing-brightgreen?logo=github)
+![Live Demo](https://img.shields.io/badge/live-demo-brightgreen)
 ![MCP](https://img.shields.io/badge/MCP-compatible-blue?logo=anthropic)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![Claude Sonnet](https://img.shields.io/badge/Claude-Sonnet%204.6-blueviolet?logo=anthropic)
@@ -37,6 +38,29 @@ git clone https://github.com/pritmon/research-mcp.git
 cd research-mcp
 npm install
 npm run build
+```
+
+---
+
+## Live Demo (REST API)
+
+The server is deployed at **`https://research-mcp.onrender.com`** (update after deploy).
+
+```bash
+# Summarize a URL
+curl -X POST https://research-mcp.onrender.com/summarize \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://en.wikipedia.org/wiki/Artificial_intelligence"}'
+
+# Extract entities
+curl -X POST https://research-mcp.onrender.com/entities \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Anthropic released Claude 4 in San Francisco."}'
+
+# Compare sources
+curl -X POST https://research-mcp.onrender.com/compare \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["https://source-a.com", "https://source-b.com"]}'
 ```
 
 ---
