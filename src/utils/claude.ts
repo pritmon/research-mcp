@@ -2,13 +2,14 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { log } from './logger.js';
 
-const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
 const ClaudeOptionsSchema = z.object({
   timeoutMs: z.number().int().positive().default(30_000),
   maxRetries: z.number().int().min(0).max(8).default(3),
   initialBackoffMs: z.number().int().positive().default(400),
   maxBackoffMs: z.number().int().positive().default(6_000),
+  maxTokens: z.number().int().positive().default(2_000),
 });
 
 type ClaudeOptions = z.infer<typeof ClaudeOptionsSchema>;
@@ -57,7 +58,7 @@ export async function claudeText(
   prompt: string,
   opts?: Partial<ClaudeOptions>
 ): Promise<string> {
-  const { timeoutMs, maxRetries, initialBackoffMs, maxBackoffMs } = ClaudeOptionsSchema.parse(opts ?? {});
+  const { timeoutMs, maxRetries, initialBackoffMs, maxBackoffMs, maxTokens } = ClaudeOptionsSchema.parse(opts ?? {});
   const client = getClaudeClient();
 
   let lastErr: unknown;
@@ -68,7 +69,7 @@ export async function claudeText(
       const msg = await client.messages.create(
         {
           model: CLAUDE_MODEL,
-          max_tokens: 800,
+          max_tokens: maxTokens,
           temperature: 0.2,
           messages: [{ role: 'user', content: prompt }],
         },
@@ -118,7 +119,8 @@ export async function claudeJson<S extends z.ZodTypeAny>(
         { timeoutMs, maxRetries: 0 }
       );
 
-      const parsed = JSON.parse(text) as unknown;
+      const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      const parsed = JSON.parse(clean) as unknown;
       return schema.parse(parsed);
     } catch (err) {
       lastErr = err;

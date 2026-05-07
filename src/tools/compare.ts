@@ -56,6 +56,6 @@ export async function compareSources(urls: string[]): Promise<CompareSourcesOutp
     JSON.stringify(CompareSourcesOutputSchema.shape, null, 2),
   ].join('\n');
 
-  return await claudeJson(prompt, CompareSourcesOutputSchema, { timeoutMs: 30_000, maxRetries: 3 });
+  return await claudeJson(prompt, CompareSourcesOutputSchema, { timeoutMs: 60_000, maxRetries: 3, maxTokens: 4_000 });
 }
 
