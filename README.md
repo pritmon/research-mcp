@@ -1,10 +1,14 @@
-# research-mcp
+# 🔬 research-mcp
+
+![Node CI](https://img.shields.io/badge/node%20ci-passing-brightgreen?logo=github)
+![MCP](https://img.shields.io/badge/MCP-compatible-blue?logo=anthropic)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![Claude Sonnet](https://img.shields.io/badge/Claude-Sonnet%204.6-blueviolet?logo=anthropic)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 A **production-ready MCP (Model Context Protocol) server** for AI-powered enterprise research workflows — summarize URLs, search the web, extract entities, and compare sources, all from any MCP-compatible client like Claude Desktop.
 
-**Production features:** strict TypeScript · Zod input validation · retries with exponential backoff · configurable timeouts · structured JSON logging · stdio transport (Claude Desktop compatible)
-
-Built with TypeScript, the official [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk), and Claude Sonnet.
+Built with TypeScript, the official [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk), and Claude Sonnet 4.6.
 
 ---
 
