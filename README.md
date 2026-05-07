@@ -1,6 +1,8 @@
 # research-mcp
 
-A production-ready **MCP (Model Context Protocol) server** for AI-powered research workflows — summarize URLs, search the web, extract entities, and compare sources, all from any MCP-compatible client like Claude Desktop.
+A **production-ready MCP (Model Context Protocol) server** for AI-powered enterprise research workflows — summarize URLs, search the web, extract entities, and compare sources, all from any MCP-compatible client like Claude Desktop.
+
+**Production features:** strict TypeScript · Zod input validation · retries with exponential backoff · configurable timeouts · structured JSON logging · stdio transport (Claude Desktop compatible)
 
 Built with TypeScript, the official [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk), and Claude Sonnet.
 
