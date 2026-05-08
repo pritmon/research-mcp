@@ -107,6 +107,7 @@ app.get('/', async (_req, reply) => {
     }
     .result.error { color: #f85149; }
     .result.show { display: block; }
+    .result.entities { font-family: sans-serif; color: #e6edf3; }
     .result.summary {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 0.88rem;
@@ -117,6 +118,11 @@ app.get('/', async (_req, reply) => {
     .result.summary ul { padding-left: 18px; margin: 4px 0; }
     .result.summary li { margin-bottom: 6px; }
     .result.summary strong { color: #f0f6fc; }
+    .ent-group { margin-bottom: 10px; }
+    .ent-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; color: #8b949e; margin-bottom: 6px; font-family: sans-serif; }
+    .ent-items { display: flex; flex-wrap: wrap; gap: 6px; }
+    .badge-item { background: #21262d; border: 1px solid #30363d; border-radius: 20px; padding: 3px 10px; font-size: 0.8rem; color: #e6edf3; font-family: sans-serif; }
+    .conf { color: #3fb950; font-size: 0.72rem; margin-left: 4px; }
     footer {
       text-align: center;
       padding: 32px;
@@ -164,7 +170,7 @@ app.get('/', async (_req, reply) => {
         <p class="tool-desc">Extract people, organizations, locations and key concepts from text.</p>
         <textarea id="entities-text" rows="3" placeholder="Anthropic released Claude 4 in San Francisco alongside OpenAI and Google DeepMind..."></textarea>
         <button onclick="call('entities')">Run</button>
-        <pre class="result" id="entities-result"></pre>
+        <pre class="result entities" id="entities-result"></pre>
       </div>
 
       <!-- Search -->
@@ -244,6 +250,20 @@ app.get('/', async (_req, reply) => {
             .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
             .replace(/\n{2,}/g, '<br/>');
           resultEl.innerHTML = html;
+        } else if (tool === 'entities') {
+          const d = data;
+          const badge = (name, score) => \`<span class="badge-item">\${name} <span class="conf">\${Math.round(score*100)}%</span></span>\`;
+          const section = (label, items, key) => items && items.length
+            ? \`<div class="ent-group"><div class="ent-label">\${label}</div><div class="ent-items">\${items.map(i => badge(i[key], i.confidence)).join('')}</div></div>\`
+            : '';
+          resultEl.innerHTML = \`
+            \${section('People', d.people, 'name')}
+            \${section('Organizations', d.organizations, 'name')}
+            \${section('Locations', d.locations, 'name')}
+            \${section('Key Concepts', d.key_concepts, 'concept')}
+            <div class="ent-group"><div class="ent-label">Sentiment</div><div class="ent-items"><span class="badge-item">\${d.sentiment}</span></div></div>
+            <div class="ent-group"><div class="ent-label">Language</div><div class="ent-items"><span class="badge-item">\${d.language}</span></div></div>
+          \`;
         } else {
           resultEl.textContent = JSON.stringify(data, null, 2);
         }
