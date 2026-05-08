@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { fetchWithRetry } from '../utils/fetch.js';
-import { summarizeUrl } from './summarize.js';
 import { log } from '../utils/logger.js';
 
 export const SearchAndSummarizeInputSchema = z.object({
@@ -22,58 +21,65 @@ function relevanceScore(query: string, title: string, summary: string): number {
   const q = query.toLowerCase().trim();
   const words = q.split(/\s+/).filter(w => w.length >= 3);
   if (words.length === 0) return 0.3;
-
   const hay = `${title}\n${summary}`.toLowerCase();
   const hits = words.reduce((acc, w) => acc + (hay.includes(w) ? 1 : 0), 0);
   return Math.max(0, Math.min(1, hits / Math.min(6, words.length)));
 }
 
+type WikiSummary = {
+  title?: string;
+  extract?: string;
+  content_urls?: { desktop?: { page?: string } };
+};
+
 /**
- * Search Wikipedia's open API for articles matching the query, then fetch and
- * summarize each result in parallel.
+ * Search Wikipedia and return article summaries instantly.
  *
- * Wikipedia's API is freely accessible from any server (no key, no rate limits
- * for reasonable usage) and returns rich, reliable data.
+ * Step 1: Wikipedia full-text search API → ranked article titles (~200ms)
+ * Step 2: Wikipedia REST summary API per article → plain-text extract (~200ms each, parallel)
  *
- * Returns `{ query, results: [{ url, title, summary, relevance_score }] }`.
+ * No Claude call needed — Wikipedia's own extracts are returned as the summary.
+ * Total time: ~1–2 seconds for 3 results.
  */
 export async function searchAndSummarize(query: string, numResults = 5): Promise<SearchAndSummarizeResult> {
   const n = Math.max(1, Math.min(8, numResults));
 
-  // Wikipedia full-text search — better relevance ranking than opensearch
-  const api = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=${n}&format=json&origin=*`;
-
-  let candidates: Array<{ url: string; title: string }> = [];
+  // Step 1: full-text search for ranked titles
+  const searchApi = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=${n}&format=json&origin=*`;
+  let titles: string[] = [];
   try {
-    const res = await fetchWithRetry(api, undefined, { timeoutMs: 10_000, maxRetries: 2 });
+    const res = await fetchWithRetry(searchApi, undefined, { timeoutMs: 8_000, maxRetries: 2 });
     const data = (await res.json()) as { query?: { search?: Array<{ title: string }> } };
-    const hits = data?.query?.search ?? [];
-    candidates = hits.map(h => ({
-      title: h.title,
-      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(h.title.replace(/ /g, '_'))}`,
-    }));
+    titles = (data?.query?.search ?? []).map(h => h.title);
   } catch (err) {
     log('warn', 'Wikipedia search API unreachable', { query }, err);
     return { query, results: [] };
   }
 
-  if (candidates.length === 0) return { query, results: [] };
+  if (titles.length === 0) return { query, results: [] };
 
+  // Step 2: fetch Wikipedia's pre-computed summary for each title in parallel
   const settled = await Promise.allSettled(
-    candidates.slice(0, n).map(async r => {
-      const summary = await summarizeUrl(r.url);
+    titles.slice(0, n).map(async title => {
+      const slug = encodeURIComponent(title.replace(/ /g, '_'));
+      const summaryApi = `https://en.wikipedia.org/api/rest_v1/page/summary/${slug}`;
+      const res = await fetchWithRetry(summaryApi, undefined, { timeoutMs: 8_000, maxRetries: 1 });
+      const data = (await res.json()) as WikiSummary;
+      const extract = data.extract ?? '';
+      const url = data.content_urls?.desktop?.page ?? `https://en.wikipedia.org/wiki/${slug}`;
       return {
-        url: r.url,
-        title: r.title,
-        summary,
-        relevance_score: relevanceScore(query, r.title, summary),
+        url,
+        title: data.title ?? title,
+        summary: extract.slice(0, 600),
+        relevance_score: relevanceScore(query, title, extract),
       };
     })
   );
 
-  const results = settled
-    .flatMap(s => (s.status === 'fulfilled' ? [s.value] : []))
-    .sort((a, b) => b.relevance_score - a.relevance_score);
-
-  return { query, results };
+  return {
+    query,
+    results: settled
+      .flatMap(s => (s.status === 'fulfilled' && s.value.summary ? [s.value] : []))
+      .sort((a, b) => b.relevance_score - a.relevance_score),
+  };
 }
