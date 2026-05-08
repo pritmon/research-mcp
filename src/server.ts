@@ -107,6 +107,12 @@ app.get('/', async (_req, reply) => {
     }
     .result.error { color: #f85149; }
     .result.show { display: block; }
+    .result.summary {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 0.88rem;
+      color: #e6edf3;
+      line-height: 1.7;
+    }
     footer {
       text-align: center;
       padding: 32px;
@@ -142,7 +148,7 @@ app.get('/', async (_req, reply) => {
         <p class="tool-desc">Fetch any public URL and get an AI-generated bullet-point summary.</p>
         <input type="text" id="summarize-url" placeholder="https://en.wikipedia.org/wiki/Artificial_intelligence" />
         <button onclick="call('summarize')">Run</button>
-        <pre class="result" id="summarize-result"></pre>
+        <pre class="result summary" id="summarize-result"></pre>
       </div>
 
       <!-- Entities -->
@@ -225,7 +231,13 @@ app.get('/', async (_req, reply) => {
           body: JSON.stringify(body),
         });
         const data = await res.json();
-        resultEl.textContent = JSON.stringify(data, null, 2);
+        let display = '';
+        if (tool === 'summarize' && data.summary) {
+          display = data.summary;
+        } else {
+          display = JSON.stringify(data, null, 2);
+        }
+        resultEl.textContent = display;
         resultEl.className = res.ok ? 'result show' : 'result error show';
       } catch (e) {
         resultEl.textContent = 'Error: ' + e.message;
