@@ -83,10 +83,9 @@ app.post('/compare', async (req, reply) => {
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
-app.listen({ port: PORT, host: '0.0.0.0' }, (err, address) => {
-  if (err) {
+app.listen({ port: PORT, host: '0.0.0.0' })
+  .then(address => log('info', 'research-mcp HTTP server started', { address }))
+  .catch(err => {
     log('error', 'Server failed to start', {}, err);
     process.exit(1);
-  }
-  log('info', 'research-mcp HTTP server started', { address });
-});
+  });
