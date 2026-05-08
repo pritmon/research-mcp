@@ -106,7 +106,7 @@ export async function main(): Promise<void> {
 }
 
 // Run when executed as a CLI entrypoint.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (decodeURI(new URL(import.meta.url).pathname) === process.argv[1]) {
   main().catch(err => {
     log('error', 'Fatal error starting server', undefined, err);
     process.exitCode = 1;
