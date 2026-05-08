@@ -284,7 +284,7 @@ app.get('/', async (_req, reply) => {
       } else if (tool === 'search') {
         const val = document.getElementById('search-query').value.trim();
         if (!val) { resultEl.textContent = 'Please enter a search query.'; resultEl.className = 'result error show'; btn.disabled = false; return; }
-        body = { query: val, num_results: 3 };
+        body = { query: val, num_results: 2 };
       } else if (tool === 'compare') {
         const val = document.getElementById('compare-urls').value.trim();
         const urls = val.split('\\n').map(function(u) { return u.trim(); }).filter(Boolean);
@@ -297,6 +297,10 @@ app.get('/', async (_req, reply) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          throw new Error('Server error (' + res.status + '). The request may have timed out — try again or use fewer results.');
+        }
         const data = await res.json();
         if (tool === 'summarize' && data.summary) {
           resultEl.innerHTML = renderSummary(data.summary);
