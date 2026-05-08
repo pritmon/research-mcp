@@ -346,7 +346,13 @@ app.post('/search', async (req, reply) => {
   }).safeParse(req.body);
   if (!parsed.success) return reply.status(400).send({ error: parsed.error.flatten() });
   try {
-    const result = await searchAndSummarize(parsed.data.query, parsed.data.num_results ?? 5);
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Search timed out — try a shorter or more specific query.')), 25_000)
+    );
+    const result = await Promise.race([
+      searchAndSummarize(parsed.data.query, parsed.data.num_results ?? 2),
+      timeout,
+    ]);
     return reply.send(result);
   } catch (err) {
     log('error', 'POST /search failed', {}, err);
