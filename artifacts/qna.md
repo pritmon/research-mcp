@@ -1,7 +1,4 @@
-# Learning Points — MCP, AI, TypeScript & Building Real Systems
-
-Everything we learned while building this project, explained in plain English.
-No unnecessary jargon. Just clear answers you can actually understand and remember.
+# MCP, AI, TypeScript & Building Real Systems
 
 ---
 
