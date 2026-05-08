@@ -1,255 +1,551 @@
-# Q&A — MCP, AI APIs, TypeScript & Production Systems
+# Learning Points — MCP, AI, TypeScript & Building Real Systems
 
-A reference guide covering the core concepts behind this project and the
-technologies it is built on.
+Everything we learned while building this project, explained in plain English.
+No unnecessary jargon. Just clear answers you can actually understand and remember.
 
 ---
 
 ## Model Context Protocol (MCP)
 
-**What is the Model Context Protocol?**
-MCP is an open standard (released by Anthropic in Nov 2024) that defines how AI
-models communicate with external tools and data sources. It decouples the tool
-implementation from the AI host — any MCP server can plug into any MCP client
-(Claude Desktop, Cursor, Zed, etc.) without custom integration code.
+**What is MCP and why does it exist?**
 
-**What transport mechanisms does MCP support?**
-Two primary transports:
-- **stdio** — the host spawns the server as a child process; communication
-  happens over stdin/stdout using JSON-RPC 2.0 framing. Zero network config.
-- **HTTP + SSE** — the server runs as an HTTP service; the client connects via
-  Server-Sent Events for streaming. Better for remote or multi-client scenarios.
+Imagine you want Claude to be able to search the web, read files, or call your
+database. Without MCP, you'd have to write custom glue code for every combination
+of AI model and tool. With MCP, you write the tool once as an MCP server, and
+it works with Claude Desktop, Cursor, Zed, or any other MCP-compatible app
+automatically.
 
-**Why is stdio preferred for local MCP servers?**
-No port management, no TLS, no authentication overhead. The host controls the
-process lifecycle. One process per host session means no shared state between users.
-
-**What is the difference between `content` and `structuredContent` in an MCP tool response?**
-`content` is the human-readable payload (rendered by the host UI — e.g. shown
-to the user in a chat). `structuredContent` is the machine-readable payload that
-the host or downstream tools can programmatically consume. Both can be returned
-simultaneously.
-
-**What does `isError: true` mean in an MCP response?**
-It signals to the host that the tool call failed. The host can then display an
-error to the user or handle it programmatically. The alternative — throwing an
-unhandled exception — would crash the server process.
-
-**How are MCP tool schemas defined?**
-Via Zod schemas in the TypeScript SDK. The SDK converts Zod schemas to JSON Schema
-for capability negotiation with the host. This keeps validation logic DRY — the
-same schema validates inputs at runtime.
+MCP is basically a universal plug socket for AI tools. One server, works everywhere.
 
 ---
 
-## LLMs & the Anthropic API
+**How does an MCP server actually talk to Claude Desktop?**
 
-**What is the difference between `claudeText` and `claudeJson` in this project?**
-`claudeText` calls Claude and returns raw text. `claudeJson` wraps `claudeText`,
-strips markdown fences from the response, JSON-parses the result, and validates it
-against a Zod schema. It retries on `SyntaxError` and `ZodError` in addition to
-transient API errors.
+There are two ways:
 
-**Why is `temperature: 0.2` used instead of 0 or 1?**
-Near-zero temperature makes outputs deterministic and factual — important for
-structured extraction (entities, JSON) and summaries where hallucination is a
-risk. A small non-zero value (0.2) avoids degenerate repetition that can occur at
-exactly 0 on some model versions.
+- **stdio (standard input/output)** — Claude Desktop launches your server as a
+  background program and they talk through the terminal's input and output streams.
+  Think of it like two people passing notes through a slot in a wall. No internet
+  connection needed. This is what we use.
 
-**What is exponential backoff with jitter and why is it used?**
-On a transient failure, the client waits `base * 2^attempt + random_jitter`
-milliseconds before retrying. The jitter (random component) prevents multiple
-clients from retrying in lockstep — a phenomenon called "thundering herd" — which
-would overwhelm the API server when it recovers.
+- **HTTP + SSE** — The server runs as a website, and Claude connects to it over
+  the internet. Better when the server needs to be shared across multiple users
+  or machines.
 
-**What is `max_tokens` and how should it be set?**
-`max_tokens` caps the length of Claude's response. Setting it too low truncates
-responses mid-sentence (causing JSON parse failures for structured output). Setting
-it too high wastes quota. Rule of thumb: for bullet summaries (~300 words) use
-600–1000 tokens; for structured JSON comparisons use 2000–4000 tokens.
-
-**Why does `claudeJson` pass `maxRetries: 0` to its inner `claudeText` call?**
-`claudeJson` manages its own retry loop at the outer level, including retries for
-JSON parse failures. Allowing `claudeText` to also retry internally would create a
-nested retry loop with multiplicative delays and make the total retry budget hard
-to reason about.
-
-**What are the main error categories when calling the Anthropic API?**
-1. **Transient network errors** — timeouts, connection resets (retry with backoff)
-2. **Rate limits (429)** — too many requests per minute (retry with backoff)
-3. **Overloaded (529)** — model capacity issue (retry with backoff)
-4. **Auth errors (401)** — invalid API key (do not retry — fail fast)
-5. **Input errors (400)** — prompt too long, invalid parameters (do not retry)
+For a local tool running on your own computer, stdio is simpler — no ports to
+configure, no security to set up.
 
 ---
 
-## TypeScript & Zod
+**What is `content` vs `structuredContent` in a tool response?**
 
-**What is Zod and why use it instead of TypeScript types alone?**
-TypeScript types are erased at runtime — they provide no validation at execution
-time. Zod defines schemas that validate data at runtime and infer TypeScript types
-from them. This is especially important at API boundaries (incoming HTTP bodies,
-Claude JSON responses) where the data shape is not guaranteed by the compiler.
+When a tool returns data, it sends two versions of the result:
 
-**What is `z.infer<typeof Schema>` and when is it useful?**
-`z.infer` extracts the TypeScript type implied by a Zod schema. Instead of
-maintaining a separate `type` or `interface` that can drift out of sync with the
-runtime schema, you define the schema once and derive the type from it.
+- `content` — the human-readable version. This is what Claude shows to the user
+  in the chat. Plain text or markdown.
+- `structuredContent` — the machine-readable version. This is a JSON object that
+  Claude or other tools can use programmatically.
+
+You can think of it like a receipt: `content` is the printed receipt you give
+the customer, `structuredContent` is the data record saved in your accounting system.
+
+---
+
+**What does `isError: true` mean?**
+
+When a tool fails, instead of crashing the whole server, it returns a response
+with `isError: true`. This tells Claude Desktop "the tool ran but something went
+wrong" — Claude can then show the user a friendly error message.
+
+The alternative — letting the error crash the server — would disconnect Claude
+Desktop from all your tools until you restarted everything. `isError: true` keeps
+things running gracefully.
+
+---
+
+**How does MCP know what inputs a tool accepts?**
+
+Every tool has a schema — a description of what data it expects. In this project
+we use **Zod** to define these schemas. The MCP SDK automatically converts the
+Zod schema into the format Claude Desktop needs to understand the tool.
+
+This means you define the rules once and they work everywhere — validation in
+your code, documentation in Claude Desktop, all from the same definition.
+
+---
+
+## Working with Claude (the AI API)
+
+**What is the difference between `claudeText` and `claudeJson`?**
+
+Both call Claude. The difference is what they do with the response:
+
+- `claudeText` — asks Claude something and gives you back the raw text answer.
+  Used for summaries, bullet points, anything that's meant to be read by humans.
+
+- `claudeJson` — asks Claude to return a specific JSON structure. After getting
+  Claude's response, it removes any markdown formatting Claude might have added,
+  parses the JSON, and checks it matches the expected shape. If something is wrong
+  it tries again automatically.
+
+Think of `claudeText` as "just tell me the answer" and `claudeJson` as "give me
+the answer in a specific form I can use in my code."
+
+---
+
+**Why is temperature set to 0.2?**
+
+Temperature controls how "creative" or "random" Claude's responses are.
+
+- **Temperature 0** — Claude always gives the most predictable, safe answer.
+  Good for consistency but can sometimes produce repetitive or robotic text.
+- **Temperature 1** — Claude gets creative and varied. Good for writing, bad for
+  structured data where you need precision.
+- **Temperature 0.2** — Mostly consistent and factual, but with just enough
+  variation to avoid robotic repetition. The sweet spot for research and extraction tasks.
+
+For tasks like extracting names from text or comparing sources, you want Claude
+to be accurate, not creative. Low temperature keeps it focused.
+
+---
+
+**What is exponential backoff and why do we use it?**
+
+When an API call fails (because the server is busy or the network hiccupped),
+you want to try again. But if you try immediately and fail again, and try again,
+and again — you're just hammering a server that's already struggling.
+
+Exponential backoff means: wait a bit before retrying. Wait a bit longer next
+time. Wait even longer after that.
+
+```
+Attempt 1 fails → wait 0.4 seconds
+Attempt 2 fails → wait 0.8 seconds
+Attempt 3 fails → wait 1.6 seconds
+```
+
+The "jitter" part adds a small random extra wait. Why? Imagine 100 apps all
+got the same error at the same time. Without jitter, they all retry at exactly
+the same moment and crash the server again. With jitter, they spread out and
+the server recovers.
+
+---
+
+**What is `max_tokens` and how do you decide what to set it to?**
+
+`max_tokens` tells Claude "stop writing after this many words." (A token is
+roughly ¾ of a word.)
+
+Set it too low and Claude's response gets cut off in the middle — which is
+particularly bad when you need JSON, because half a JSON object is useless.
+
+Set it too high and you waste money and time waiting for Claude to write more
+than you need.
+
+**Rough guide:**
+- Short summaries (a few bullet points): 600–1000 tokens
+- Detailed analysis or comparison: 2000–4000 tokens
+- Structured JSON with many fields: 2000–4000 tokens
+
+Size it based on the longest response you'd reasonably expect, not a fixed global number.
+
+---
+
+**Why do we retry on some errors but not others?**
+
+Not all errors are the same. Some are temporary, some are permanent:
+
+| Error | Meaning | What to do |
+|-------|---------|------------|
+| Network timeout | Server was slow — try again | Retry |
+| Rate limit (429) | Too many requests — slow down | Retry after waiting |
+| Server overloaded (529) | Claude is busy | Retry after waiting |
+| Wrong API key (401) | Your key is invalid | Stop immediately — retrying won't help |
+| Bad input (400) | Your prompt is wrong | Stop immediately — retrying sends the same bad data |
+
+Retrying a wrong API key 3 times wastes 3x the time and gets the same result.
+Retrying a timeout often succeeds on the next attempt.
+
+---
+
+## TypeScript and Zod
+
+**Why use Zod when TypeScript already has types?**
+
+TypeScript types are like comments — they help you while writing code, but they
+disappear completely when the code actually runs. At runtime, TypeScript has no
+idea what shape your data is.
+
+Zod is different. It checks data at runtime — when real data from real users
+arrives. So when someone sends your API `{"url": 12345}` instead of
+`{"url": "https://..."}`, Zod catches it and returns a proper error. TypeScript
+alone would have let it through and crashed somewhere unexpected.
+
+**Simple rule:** TypeScript types tell you what your code expects. Zod checks
+that reality matches those expectations.
+
+---
+
+**What is `z.infer` and why is it useful?**
+
+Normally you'd write a TypeScript type AND a Zod schema separately — two
+definitions of the same thing that can drift out of sync over time.
+
+`z.infer` lets you write the Zod schema once and automatically generate the
+TypeScript type from it:
 
 ```typescript
-const UserSchema = z.object({ name: z.string(), age: z.number() });
-type User = z.infer<typeof UserSchema>; // { name: string; age: number }
+// Define the schema once
+const UserSchema = z.object({
+  name: z.string(),
+  age: z.number()
+});
+
+// TypeScript type is generated automatically — no duplication
+type User = z.infer<typeof UserSchema>;
+// User = { name: string; age: number }
 ```
+
+One source of truth. Change the schema, the type updates automatically.
+
+---
 
 **What is the difference between `parse` and `safeParse` in Zod?**
-- `parse` throws a `ZodError` on invalid input — suitable when you want to let
-  the error propagate to an error handler.
-- `safeParse` returns `{ success: true, data }` or `{ success: false, error }` —
-  suitable in route handlers where you want to return a structured 400 response
-  rather than throwing.
 
-**What is strict TypeScript mode and what does it enable?**
-`"strict": true` in `tsconfig.json` enables a group of checks:
-- `noImplicitAny` — variables must have explicit types
-- `strictNullChecks` — `null` and `undefined` are not assignable to other types
-- `strictFunctionTypes` — function parameters are checked contravariantly
-These catch entire classes of bugs (null dereferences, untyped callbacks) at
-compile time rather than runtime.
+Both validate data against a schema. The difference is what happens when validation fails:
 
-**What is `Promise.allSettled` and how does it differ from `Promise.all`?**
-`Promise.all` rejects as soon as any promise rejects — a single failure cancels
-all results. `Promise.allSettled` waits for every promise and returns an array of
-`{ status: 'fulfilled', value }` or `{ status: 'rejected', reason }` objects.
-Use `allSettled` when partial results are better than no results (e.g. fetching
-five URLs in parallel — a single unreachable site should not discard the other four).
+- `parse` — throws an error immediately. Use this inside functions where you want
+  the error to bubble up to a central error handler.
+
+- `safeParse` — returns a result object telling you whether it succeeded or failed.
+  Use this in API route handlers where you want to send a proper "400 Bad Request"
+  response instead of crashing.
+
+```typescript
+// parse — throws if invalid
+const data = UserSchema.parse(req.body);
+
+// safeParse — you handle the failure yourself
+const result = UserSchema.safeParse(req.body);
+if (!result.success) {
+  return reply.status(400).send({ error: result.error.flatten() });
+}
+```
 
 ---
 
-## HTTP, REST & Fastify
+**What is strict mode in TypeScript and why enable it?**
 
-**Why Fastify instead of Express?**
-- Fastify is 2–3× faster than Express on benchmarks (lower per-request overhead).
-- Built-in TypeScript support with accurate generics.
-- Schema-based validation hooks.
-- Active maintenance and modern async-first API.
-- `reply.send()` handles serialisation; no need to remember `res.json()`.
+Strict mode turns on a set of extra safety checks in TypeScript. The most important ones:
 
-**What changed in Fastify v5 that breaks older code?**
-The `listen()` callback signature was removed. In v4 you could pass a callback:
-`app.listen({ port }, (err, address) => {})`. In v5, `listen()` returns a Promise
-that must be awaited or chained with `.then().catch()`.
+- **noImplicitAny** — every variable must have a clear type. You can't just leave
+  things as unknown "any" type.
+- **strictNullChecks** — you must handle the possibility that something is `null`
+  or `undefined` before using it.
 
-**What does `Content-Type: application/json` do in a POST request?**
-It tells the server how to parse the request body. Fastify (and most frameworks)
-read this header to decide which body parser to invoke. Without it, the body is
-treated as a raw buffer — `req.body` would be `null` or `undefined`.
+These feel restrictive at first, but they prevent an entire category of bugs —
+especially the classic "Cannot read properties of undefined" crash that happens
+at runtime on real users' data.
 
-**What is a graceful timeout pattern with `Promise.race`?**
+---
+
+**What is `Promise.allSettled` and when should you use it over `Promise.all`?**
+
+Both run multiple async operations at the same time. The difference is what
+happens when one fails:
+
+- `Promise.all` — if any one operation fails, everything stops. You get nothing.
+- `Promise.allSettled` — waits for all operations to finish regardless. You get
+  the results of the ones that succeeded and the errors of the ones that failed.
+
+**Use `Promise.all` when:** all results are required and one failure means the
+whole thing is useless.
+
+**Use `Promise.allSettled` when:** partial results are better than nothing.
+Example: fetching 5 URLs — if one website is down, you still want the other 4.
+
+In this project, we use `Promise.allSettled` everywhere so that one slow or
+broken website doesn't cancel all the other good results.
+
+---
+
+## HTTP Servers and Fastify
+
+**Why Fastify and not Express?**
+
+Express is the most popular, but Fastify has real advantages:
+
+- It's 2–3 times faster than Express (matters when you have many users)
+- TypeScript support is built in — no fighting with types
+- Modern async/await design — cleaner code, fewer bugs
+- Actively maintained with regular updates
+
+Both work. Fastify is just a better choice for new TypeScript projects.
+
+---
+
+**What broke in Fastify version 5?**
+
+In the old version (v4), you started the server with a callback:
+
+```typescript
+app.listen({ port: 3000 }, (err, address) => {
+  console.log('Running on', address);
+});
+```
+
+In version 5, this callback was completely removed — without any compile error or
+warning. The server still started internally, but the callback was silently ignored.
+No startup log, no error handling, no idea if it worked.
+
+The fix is to use the modern Promise style:
+
+```typescript
+app.listen({ port: 3000 })
+  .then(address => console.log('Running on', address))
+  .catch(err => process.exit(1));
+```
+
+This was one of the hardest bugs to find because everything looked fine on the
+surface — the process was running, just not responding.
+
+---
+
+**What does `Content-Type: application/json` do?**
+
+When you send data to a server, you include a header that says what format the
+data is in. `Content-Type: application/json` tells the server "my request body
+is JSON — please parse it as JSON."
+
+Without this header, Fastify doesn't know how to read the body, so `req.body`
+comes through as empty or undefined — and your validation fails for no obvious reason.
+
+Always include `Content-Type: application/json` when sending JSON in a POST request.
+
+---
+
+**What is `Promise.race` and why do we use it for timeouts?**
+
+`Promise.race` runs multiple promises at the same time and returns whichever one
+finishes first — the others are ignored.
+
+We use this to add a hard deadline to the search endpoint:
+
 ```typescript
 const result = await Promise.race([
-  slowOperation(),
+  searchAndSummarize(query),              // the real work
   new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Timed out')), 25_000)
-  ),
+    setTimeout(() => reject(new Error('Timed out')), 25_000)  // the deadline
+  )
 ]);
 ```
-If `slowOperation()` takes longer than 25 seconds, the timeout promise rejects
-first, the `race` rejects, and the route handler returns a structured JSON error
-instead of hanging the connection indefinitely.
 
-**What is `AbortController` and why is a new one created per retry attempt?**
-`AbortController` provides a cancellation signal that can abort a `fetch` in
-progress. Creating a new controller per attempt is necessary because once a
-controller's `.abort()` is called its signal is permanently aborted — reusing it
-on a subsequent fetch would cancel that fetch immediately.
+If the search finishes in 10 seconds — great, we get the results.
+If it takes longer than 25 seconds — the timeout "wins" the race, and we return
+a clean JSON error instead of hanging forever or letting the hosting platform
+return an HTML error page.
 
 ---
 
-## Web Scraping & HTML Parsing
+**What is `AbortController` and why create a new one each retry?**
 
-**What does Cheerio do?**
-Cheerio is a server-side jQuery-like library for parsing and querying HTML. In
-this project it is used to strip navigation, scripts, styles, and boilerplate
-(`<nav>`, `<footer>`, `<aside>`, `<script>`, etc.) from fetched pages, leaving
-only the meaningful body text for Claude to summarise.
+`AbortController` is a way to cancel a fetch request that's taking too long.
+You create a controller, attach its "signal" to the fetch, then call `.abort()`
+to cancel it.
 
-**Why truncate page content to 12 000 characters before sending to Claude?**
-LLMs have a finite context window (measured in tokens, ~4 chars/token). Sending
-the full text of a long article would consume the entire context and increase
-cost and latency. 12 000 characters (~3 000 tokens) captures enough content for
-a useful summary while leaving room for the system prompt and the response.
+The important rule: once you abort a controller, it's permanently aborted.
+If you reuse the same controller for a retry, the new request gets cancelled
+immediately — before it even starts.
+
+So we create a fresh `AbortController` for every attempt. Each attempt gets a
+clean, unaborted signal.
+
+---
+
+## Web Fetching and HTML Cleaning
+
+**What does Cheerio do and why do we need it?**
+
+When you fetch a web page, you get raw HTML — hundreds of lines of `<div>`,
+`<nav>`, `<script>`, `<footer>`, and other tags that have nothing to do with
+the actual content. If you sent all of that to Claude, it would waste most of
+its reading budget on navigation menus and cookie banners.
+
+Cheerio strips all the junk (scripts, styles, navbars, footers) and extracts
+just the readable text. Think of it as a "give me just the article, nothing else"
+button for any web page.
+
+---
+
+**Why do we only send the first 12,000 characters to Claude?**
+
+Claude can only read a certain amount of text at once (its "context window").
+A long Wikipedia article might have 80,000 characters — sending all of it would:
+- Use most of Claude's context window, leaving little room for its response
+- Cost more (you pay per token)
+- Take longer to process
+
+12,000 characters is enough to understand what an article is about and write
+a good summary. The first part of an article almost always contains the most
+important information anyway.
+
+---
 
 **What is `he.decode()` and why is it needed?**
-After Cheerio extracts text, HTML entities (`&amp;`, `&nbsp;`, `&#x27;`, etc.)
-may still appear in the output. `he.decode()` converts them to their Unicode
-equivalents so Claude receives clean readable text rather than escaped HTML.
+
+After Cheerio extracts text from HTML, some characters might still appear as
+HTML escape codes — like `&amp;` instead of `&`, or `&nbsp;` instead of a space.
+
+`he.decode()` converts all those codes back into normal readable characters so
+Claude gets clean text instead of a string full of `&amp;` and `&#x27;`.
+
+Without it, Claude might summarise an article that contains "&amp;amp;amp;" as
+meaningful content — which it isn't.
 
 ---
 
-## Logging & Observability
+## Logging
 
-**Why write logs to stderr instead of stdout?**
-The MCP stdio transport uses stdin/stdout as a bidirectional JSON-RPC channel.
-Any non-protocol bytes written to stdout (including log lines) corrupt the
-message framing and break communication with the host. stderr is a separate
-stream that the host does not read for protocol data.
+**Why do we write logs to stderr and not stdout?**
 
-**What is structured / NDJSON logging?**
-Each log line is a complete JSON object on a single line (Newline-Delimited JSON).
-This makes logs trivially parseable by log aggregators (Datadog, Loki, CloudWatch)
-without regex fragility. Each event includes `level`, `msg`, `time`, `name`, and
-optionally `data` and `err`.
+The MCP stdio server communicates with Claude Desktop through stdout — every line
+written to stdout is treated as a message in the MCP protocol.
 
-**What information should an error log include?**
-At minimum: `err.name`, `err.message`, and `err.stack`. In production, adding
-request context (URL, query, attempt number) makes root-cause analysis much
-faster. Stack traces should be included in development/staging and optionally
-redacted in production logs that are customer-visible.
+If we also wrote log lines to stdout, Claude Desktop would receive both real
+protocol messages AND log lines mixed together. It would be like trying to have
+a phone conversation while someone randomly reads out unrelated sentences into
+the same phone.
+
+stderr is a completely separate output stream that Claude Desktop ignores. So
+logs go to stderr and stay out of the way.
 
 ---
 
-## Deployment & CI/CD
+**What is structured logging and why is it better than `console.log`?**
 
-**What is `render.yaml` and how does it work?**
-`render.yaml` is Render's Infrastructure-as-Code config file. It declares the
-service type (`web`), the build command, the start command, and environment
-variable names. When committed to the repo, Render reads it on deploy so the
-service configuration is version-controlled alongside the code.
+A `console.log` line might look like:
+```
+Error fetching URL https://example.com timeout after 10000ms
+```
+
+A structured log line looks like:
+```json
+{"level":"error","msg":"Fetch failed","url":"https://example.com","timeoutMs":10000,"time":"2026-05-08T11:30:00Z"}
+```
+
+The structured version is a proper JSON object. This means you can:
+- Filter all errors with `level === "error"` automatically
+- Search for all events involving a specific URL
+- Feed it into monitoring tools like Datadog or Grafana
+
+Plain text logs require someone to write regex patterns just to extract basic
+information. Structured logs are queryable from day one.
+
+---
+
+**What should every error log include?**
+
+At minimum:
+- **What went wrong** — the error message
+- **Where it went wrong** — the error type and stack trace
+- **What was being processed** — the URL, query, or input that caused the error
+
+The more context you include, the faster you can find and fix the problem.
+Stack traces especially — without them, you know something broke but not where.
+
+---
+
+## Deployment
+
+**What is `render.yaml` and why does it matter?**
+
+`render.yaml` is a file that tells Render exactly how to deploy your project —
+what command to use to build it, what command to start it, what environment
+variables it needs.
+
+Without this file, you'd have to configure all of that manually in the Render
+dashboard every time. With the file committed to git, the configuration is
+part of the code — if you change the build command, the change is tracked,
+reviewed, and applied automatically on the next deploy.
+
+**Config as code** — your deployment settings are version controlled just like
+your code. No more "I changed something in the dashboard and forgot what."
+
+---
 
 **What is the difference between `npm install` and `npm ci`?**
-`npm ci` installs from `package-lock.json` exactly — it never modifies the lock
-file and fails if it does not exist. This makes it deterministic and faster in CI
-environments. `npm install` resolves ranges and may update the lock file.
 
-**Why test across a Node.js version matrix in CI?**
-Node releases introduce new V8 engine features, deprecate APIs, and occasionally
-change runtime behaviour. Testing on 18, 20, and 22 simultaneously catches
-breakage introduced by version-specific changes before it reaches production.
+- `npm install` — figures out which versions of packages to install based on
+  the rules in `package.json`. It might install slightly different versions than
+  last time. Used during local development.
 
-**What does `npm run prepare` do in this project?**
-The `prepare` lifecycle script runs `npm run build` automatically before
-`npm publish` and after `npm install` in some contexts. This ensures the `dist/`
-output is always built from the latest source before the package is published or
-used as a linked local dependency.
+- `npm ci` — installs exactly the versions recorded in `package-lock.json`. No
+  guessing, no variation. If the lock file is missing, it fails loudly.
+
+In CI/CD pipelines (automated build and deploy), use `npm ci`. You want the
+build to be identical every single time. `npm install` can silently install
+slightly different package versions and introduce unexpected differences between
+builds.
+
+---
+
+**Why run CI tests across multiple Node.js versions (18, 20, 22)?**
+
+Node.js releases contain updates to the JavaScript engine. Occasionally these
+updates change behaviour — a function that works in Node 18 might behave
+differently in Node 22.
+
+Testing against multiple versions means you catch these differences before
+they affect real users. It also proves your project works for users who haven't
+updated to the latest Node version yet.
+
+If your CI only tests one version and a user runs a different one, you might
+ship code that works for you but breaks for them.
 
 ---
 
 ## Security
 
-**Why should API keys never appear in source code or git history?**
-Once committed, a secret is permanently in git history — even after deletion, it
-is recoverable via `git log`. Rotate any key that has been committed immediately.
-Use environment variables or a secrets manager (Render's env vars, AWS Secrets
-Manager, Doppler) instead.
+**Why must API keys never be in the code or git history?**
 
-**What is input validation and why is it important at API boundaries?**
-External input — HTTP request bodies, URL parameters, query strings — is untrusted
-data. Validating it with Zod before passing it to business logic prevents:
-- Passing `undefined` or `null` to functions that assume a value exists
-- Oversized payloads exhausting memory or token budgets
-- Malformed URLs causing unexpected fetch behaviour
+Once something is committed to git, it stays in the history forever — even if
+you delete the file in a later commit. Anyone who clones the repo (now or in the
+future) can run `git log` and find the key.
 
-**What error information should never be returned to an API caller?**
-Internal stack traces, database connection strings, file paths, and environment
-variable names. Exposing these gives attackers a map of the system. Return a
-generic message to the caller and log the full error server-side only.
+GitHub even scans public repositories for API keys and alerts the service
+provider automatically. In many cases the key gets revoked within minutes of
+being pushed.
+
+Keep API keys in environment variables. Render, Vercel, and similar platforms
+have a dashboard specifically for storing these secrets safely.
+
+---
+
+**Why do we validate user input before using it?**
+
+Data that comes from outside your system — from a user's request, an API
+response, or a form — cannot be trusted. It might be missing, in the wrong
+format, or intentionally malformed.
+
+Validating at the boundary (before the data goes anywhere in your code) means:
+- Your functions receive exactly the type of data they expect
+- One consistent place handles all the "what if the data is bad?" logic
+- Attackers can't crash your server by sending unexpected input
+
+Think of it like checking IDs at the door. Once someone is inside, you trust them.
+But you check everyone before they enter.
+
+---
+
+**What should you never include in an API error response?**
+
+Never expose to users:
+- Stack traces (shows exactly where your code lives and how it's structured)
+- File paths (reveals your server's directory layout)
+- Database errors (can expose table names, column names, or connection details)
+- Environment variable names (hints at what secrets you're using)
+
+Return a simple, vague message to the user: *"Something went wrong. Please try again."*
+
+Log the full detailed error server-side where only you can see it. The user
+gets a friendly message. You get the full information needed to debug.
