@@ -18,22 +18,6 @@ export type SearchAndSummarizeResult = {
   }>;
 };
 
-type DdgTopic = {
-  FirstURL?: string;
-  Text?: string;
-  Topics?: DdgTopic[];
-};
-
-function flattenTopics(topics: DdgTopic[] | undefined): Array<{ url: string; title: string }> {
-  const out: Array<{ url: string; title: string }> = [];
-  const walk = (t: DdgTopic): void => {
-    if (t.FirstURL && t.Text) out.push({ url: t.FirstURL, title: t.Text });
-    if (t.Topics) t.Topics.forEach(walk);
-  };
-  (topics ?? []).forEach(walk);
-  return out;
-}
-
 function relevanceScore(query: string, title: string, summary: string): number {
   const q = query.toLowerCase().trim();
   const words = q.split(/\s+/).filter(w => w.length >= 3);
@@ -45,62 +29,39 @@ function relevanceScore(query: string, title: string, summary: string): number {
 }
 
 /**
- * Uses DuckDuckGo Instant Answer API (no key) to find results, then fetches and
- * summarizes each result in parallel using `Promise.allSettled`.
+ * Search Wikipedia's open API for articles matching the query, then fetch and
+ * summarize each result in parallel.
+ *
+ * Wikipedia's API is freely accessible from any server (no key, no rate limits
+ * for reasonable usage) and returns rich, reliable data.
  *
  * Returns `{ query, results: [{ url, title, summary, relevance_score }] }`.
  */
 export async function searchAndSummarize(query: string, numResults = 5): Promise<SearchAndSummarizeResult> {
   const n = Math.max(1, Math.min(8, numResults));
-  const api = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1`;
 
-  let json: Record<string, unknown> = {};
+  // Wikipedia opensearch — returns titles + page URLs
+  const api = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=${n}&namespace=0&format=json&origin=*`;
+
+  let candidates: Array<{ url: string; title: string }> = [];
   try {
-    const res = await fetchWithRetry(api, undefined, { timeoutMs: 15_000, maxRetries: 1 });
-    json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const res = await fetchWithRetry(api, undefined, { timeoutMs: 10_000, maxRetries: 2 });
+    // opensearch returns [query, [titles], [descriptions], [urls]]
+    const data = (await res.json()) as [string, string[], string[], string[]];
+    const titles = data[1] ?? [];
+    const urls = data[3] ?? [];
+    candidates = titles
+      .map((title, i) => ({ title, url: urls[i] ?? '' }))
+      .filter(r => r.url && r.title);
   } catch (err) {
-    log('warn', 'DuckDuckGo API unreachable; returning empty results', { query }, err);
+    log('warn', 'Wikipedia search API unreachable', { query }, err);
     return { query, results: [] };
   }
 
-  const schema = z.object({
-    AbstractURL: z.string().optional(),
-    AbstractText: z.string().optional(),
-    Heading: z.string().optional(),
-    Results: z
-      .array(z.object({ FirstURL: z.string().optional(), Text: z.string().optional() }))
-      .optional(),
-    RelatedTopics: z.array(z.any()).optional(),
-  });
-
-  const ddg = schema.safeParse(json);
-  if (!ddg.success) {
-    log('warn', 'DuckDuckGo response did not match expected schema', { query });
-    return { query, results: [] };
-  }
-
-  const candidate: Array<{ url: string; title: string }> = [];
-  if (ddg.data.AbstractURL && ddg.data.Heading) candidate.push({ url: ddg.data.AbstractURL, title: ddg.data.Heading });
-  for (const r of ddg.data.Results ?? []) {
-    if (r.FirstURL && r.Text) candidate.push({ url: r.FirstURL, title: r.Text });
-  }
-  candidate.push(
-    ...flattenTopics(ddg.data.RelatedTopics as unknown as DdgTopic[] | undefined)
-  );
-
-  // De-dupe and cap
-  const seen = new Set<string>();
-  const urls = candidate
-    .filter(r => {
-      if (!r.url || seen.has(r.url)) return false;
-      seen.add(r.url);
-      return true;
-    })
-    .slice(0, n);
+  if (candidates.length === 0) return { query, results: [] };
 
   const settled = await Promise.allSettled(
-    urls.map(async r => {
-      // Quick HEAD-style fetch isn't reliable across sites; instead fetch text directly.
+    candidates.slice(0, n).map(async r => {
       const page = await fetchPageText(r.url, 10_000);
       const summary = await summarizeUrl(page.finalUrl);
       return {
@@ -118,4 +79,3 @@ export async function searchAndSummarize(query: string, numResults = 5): Promise
 
   return { query, results };
 }
-
