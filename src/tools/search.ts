@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { fetchWithRetry } from '../utils/fetch.js';
+import { claudeText } from '../utils/claude.js';
 import { log } from '../utils/logger.js';
 
 export const SearchAndSummarizeInputSchema = z.object({
@@ -67,10 +68,22 @@ export async function searchAndSummarize(query: string, numResults = 5): Promise
       const data = (await res.json()) as WikiSummary;
       const extract = data.extract ?? '';
       const url = data.content_urls?.desktop?.page ?? `https://en.wikipedia.org/wiki/${slug}`;
+
+      // Format as bullet points using Claude — input is tiny (~600 chars) so ~3-5s
+      let summary = extract.slice(0, 600);
+      try {
+        summary = await claudeText(
+          `Summarize this in 4-6 bullet points (each <= 20 words, start each with "- **Key term**: detail"):\n\n${extract.slice(0, 800)}`,
+          { timeoutMs: 20_000, maxRetries: 1, maxTokens: 300 }
+        );
+      } catch {
+        // fall back to plain extract if Claude fails
+      }
+
       return {
         url,
         title: data.title ?? title,
-        summary: extract.slice(0, 600),
+        summary,
         relevance_score: relevanceScore(query, title, extract),
       };
     })
