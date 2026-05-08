@@ -1,278 +1,295 @@
-# Deployment Guide — Problems Faced & How They Were Resolved
+# Deployment Guide — Problems & Solutions
 
-A full record of every real issue encountered while building, deploying, and
-running this project — including the root cause and the exact fix applied.
+This is a real story of every problem we hit while building and deploying
+this project, written in plain English. Each problem explains what went wrong,
+why it happened, and exactly how we fixed it.
 
 ---
 
 ## Table of Contents
 
-1. [Claude Desktop — MCP server not starting](#1-claude-desktop--mcp-server-not-starting)
-2. [Claude Desktop — `node` command not found](#2-claude-desktop--node-command-not-found)
-3. [Anthropic API — 401 Unauthorized](#3-anthropic-api--401-unauthorized)
-4. [Anthropic API — deprecated model ID](#4-anthropic-api--deprecated-model-id)
-5. [compare_sources — JSON response truncated](#5-compare_sources--json-response-truncated)
-6. [Claude — wrapping JSON in markdown fences](#6-claude--wrapping-json-in-markdown-fences)
-7. [Render — wrong start command (MCP server instead of HTTP)](#7-render--wrong-start-command-mcp-server-instead-of-http)
-8. [Render — Fastify v5 `.listen()` callback silently ignored](#8-render--fastify-v5-listen-callback-silently-ignored)
-9. [Render — search returning HTML instead of JSON (504 timeout)](#9-render--search-returning-html-instead-of-json-504-timeout)
-10. [Render — DuckDuckGo API blocked on cloud IPs](#10-render--duckduckgo-api-blocked-on-cloud-ips)
-11. [Search — empty results due to double-fetching](#11-search--empty-results-due-to-double-fetching)
-12. [Search — wrong Wikipedia article returned](#12-search--wrong-wikipedia-article-returned)
-13. [Search — too slow (15–25 seconds per query)](#13-search--too-slow-1525-seconds-per-query)
-14. [Embedded HTML/JS — escape sequences eaten by TypeScript template literals](#14-embedded-htmljs--escape-sequences-eaten-by-typescript-template-literals)
-15. [Demo UI — Run buttons broken (event global not reliable)](#15-demo-ui--run-buttons-broken-event-global-not-reliable)
-16. [Demo UI — results showing raw JSON instead of formatted UI](#16-demo-ui--results-showing-raw-json-instead-of-formatted-ui)
+1. [MCP server did nothing in Claude Desktop (space in folder name)](#1-mcp-server-did-nothing-in-claude-desktop)
+2. [Claude Desktop couldn't find the `node` command](#2-claude-desktop-couldnt-find-the-node-command)
+3. [API calls failed with "401 Unauthorized"](#3-api-calls-failed-with-401-unauthorized)
+4. [Claude returned "model not found"](#4-claude-returned-model-not-found)
+5. [Compare tool cut off the response halfway](#5-compare-tool-cut-off-the-response-halfway)
+6. [Claude returned JSON wrapped in code fences](#6-claude-returned-json-wrapped-in-code-fences)
+7. [Render deployed successfully but then crashed instantly](#7-render-deployed-successfully-but-then-crashed-instantly)
+8. [The HTTP server started but never responded](#8-the-http-server-started-but-never-responded)
+9. [Search returned an HTML page instead of JSON](#9-search-returned-an-html-page-instead-of-json)
+10. [Search always returned zero results on Render](#10-search-always-returned-zero-results-on-render)
+11. [Wikipedia results were empty even though the API responded](#11-wikipedia-results-were-empty-even-though-the-api-responded)
+12. [Searching "Narendra Modi" returned a cricket stadium](#12-searching-narendra-modi-returned-a-cricket-stadium)
+13. [Search took 15–25 seconds — way too slow](#13-search-took-1525-seconds--way-too-slow)
+14. [JavaScript inside the demo page was completely broken](#14-javascript-inside-the-demo-page-was-completely-broken)
+15. [Clicking "Run" did nothing at all](#15-clicking-run-did-nothing-at-all)
+16. [Results showed raw JSON instead of a nice UI](#16-results-showed-raw-json-instead-of-a-nice-ui)
 
 ---
 
-## 1. Claude Desktop — MCP server not starting
+## 1. MCP server did nothing in Claude Desktop
 
-**Symptom**
-The MCP server appeared in Claude Desktop's config but tools were never available.
-No error was shown — it simply silently did nothing.
+**What happened**
+We added the MCP server to Claude Desktop's config file. Claude Desktop showed
+no error — but the research tools were never available. It just silently did nothing.
 
-**Root cause**
-The project lived inside a folder called `CLAUDE CODE` (with a space).
-In ESM, `import.meta.url` is a `file://` URL — spaces are percent-encoded as `%20`.
-So `import.meta.url` contained `CLAUDE%20CODE` while `process.argv[1]` contained
-the literal path with a space. The entrypoint guard:
+**Why it happened**
+The project folder was named `CLAUDE CODE` — with a space in the name.
 
-```typescript
-// BROKEN — never true when path contains spaces
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main();
-}
+When Node.js builds a file URL, it converts spaces into `%20` (because URLs
+can't have spaces). So the file path in Node looked like `CLAUDE%20CODE/...`.
+
+But the actual path on disk looked like `CLAUDE CODE/...` (with a real space).
+
+The code was checking: *"Am I being run directly?"* by comparing these two
+strings. Since `CLAUDE%20CODE` ≠ `CLAUDE CODE`, the comparison was always
+false — and the server never actually started.
+
+```
+What Node saw:   file:///Users/.../CLAUDE%20CODE/dist/src/index.js
+What we compared: /Users/.../CLAUDE CODE/dist/src/index.js
+↑ These are never equal, so the server never started.
 ```
 
-...always evaluated to `false`, so `main()` was never called and the server
-silently exited without connecting to the stdio transport.
-
-**Fix**
-Decode the URL before comparing:
+**How we fixed it**
+Decode the URL before comparing, so `%20` gets converted back to a space first:
 
 ```typescript
-// FIXED — decodeURI normalises %20 → space before comparison
-if (decodeURI(new URL(import.meta.url).pathname) === process.argv[1]) {
-  main();
-}
+// BROKEN — compares encoded URL to plain path, always fails
+if (import.meta.url === `file://${process.argv[1]}`) { ... }
+
+// FIXED — decode first, then compare
+if (decodeURI(new URL(import.meta.url).pathname) === process.argv[1]) { ... }
 ```
 
-**Lesson**
-Never assume file paths are URL-safe. Any space, parenthesis, or non-ASCII
-character in a directory name will be percent-encoded in `import.meta.url`.
-Always decode before comparing.
+**The lesson**
+If your project folder has a space in its name, file URL comparisons will
+silently fail. Always decode URLs before comparing them to file paths.
 
 ---
 
-## 2. Claude Desktop — `node` command not found
+## 2. Claude Desktop couldn't find the `node` command
 
-**Symptom**
-Even after fixing the entrypoint guard, Claude Desktop logged an error like
-`spawn node ENOENT` — it couldn't find the `node` executable.
+**What happened**
+Even after fixing problem #1, Claude Desktop showed an error:
+`spawn node ENOENT` — meaning it literally could not find `node`.
 
-**Root cause**
-Claude Desktop is a GUI application launched by macOS, not from a terminal.
-GUI apps on macOS do not inherit the shell `PATH` that you configure in
-`.zshrc` or `.bash_profile`. The `node` command resolves correctly in a
-terminal because the terminal sets up `PATH` — but Claude Desktop has only
-the default system `PATH`, which does not include Homebrew or `nvm` paths.
+**Why it happened**
+When you open a terminal, your computer loads a configuration file
+(`.zshrc` or `.bash_profile`) that tells it where to find programs like `node`.
+This is called the `PATH`.
 
-**Fix**
-Use the absolute path to the Node binary in the Claude Desktop config:
+Claude Desktop is not opened from a terminal — it's a normal Mac app opened
+from the Dock. Mac apps like this don't load your terminal config, so they
+don't know where `node` lives.
+
+Typing `node` in a terminal works because your terminal set up `PATH`.
+Claude Desktop has no idea what `PATH` is — it only knows the basic system
+paths, which don't include where Homebrew or nvm installed Node.
+
+**How we fixed it**
+Instead of writing just `"node"`, we wrote the full path to where node is installed:
 
 ```json
-// BROKEN
+// BROKEN — Claude Desktop doesn't know where "node" is
 { "command": "node" }
 
-// FIXED
+// FIXED — tell it exactly where to find node
 { "command": "/usr/local/bin/node" }
 ```
 
-Find your Node path with `which node` in a terminal.
+Run `which node` in your terminal to find the right path on your machine.
 
-**Lesson**
-For any application launched outside a terminal (Claude Desktop, cron jobs,
-launchd, systemd services), never rely on PATH-relative commands. Always use
-absolute binary paths.
-
----
-
-## 3. Anthropic API — 401 Unauthorized
-
-**Symptom**
-Every Claude call failed immediately with HTTP 401 and the message
-`"invalid x-api-key"`.
-
-**Root cause**
-The API key being used had been revoked in the Anthropic Console (either
-manually or because it was previously exposed). The SDK does not distinguish
-between "wrong key" and "revoked key" — both return 401.
-
-**Fix**
-1. Log into [console.anthropic.com](https://console.anthropic.com)
-2. Generate a new API key
-3. Update the `ANTHROPIC_API_KEY` environment variable in Render's dashboard
-   and in the local `.env` / shell config
-
-**Lesson**
-API keys should be treated as passwords. Rotate them immediately if they
-appear in logs, screenshots, or source code. Never commit them to git.
+**The lesson**
+Whenever a program is launched outside a terminal (Claude Desktop, scheduled
+tasks, system services), never use short command names. Always use the full
+path like `/usr/local/bin/node`.
 
 ---
 
-## 4. Anthropic API — deprecated model ID
+## 3. API calls failed with "401 Unauthorized"
 
-**Symptom**
-Claude API calls returned a 404 or "model not found" error.
+**What happened**
+Every single call to Claude failed immediately with the error `invalid x-api-key`.
 
-**Root cause**
-The initial code used `claude-sonnet-4-20250514` — a model ID that had been
-retired. Anthropic deprecates model IDs over time as new versions are released.
+**Why it happened**
+The API key being used had been revoked. This can happen if you previously
+shared it by accident, or deleted it in the Anthropic dashboard. A revoked
+key looks exactly like a wrong key to the API — both return 401.
 
-**Fix**
-Update `CLAUDE_MODEL` in `src/utils/claude.ts` to the current model:
+**How we fixed it**
+1. Go to [console.anthropic.com](https://console.anthropic.com)
+2. Create a new API key
+3. Update the key in Render's environment variables dashboard
+4. Update it locally too
+
+**The lesson**
+API keys are like passwords. If one gets exposed (in a screenshot, log file,
+or accidentally pushed to git), revoke it immediately and create a new one.
+Never put API keys directly in your code.
+
+---
+
+## 4. Claude returned "model not found"
+
+**What happened**
+Claude API calls returned a 404 error — the model we asked for didn't exist.
+
+**Why it happened**
+The code was using `claude-sonnet-4-20250514` — a specific dated version of
+Claude that had been retired. Anthropic regularly replaces old model versions
+with newer ones. The old ID simply stops working.
+
+**How we fixed it**
+Updated the model name in `src/utils/claude.ts`:
 
 ```typescript
-// BEFORE
+// BEFORE — old, retired model
 const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
 
-// AFTER
+// AFTER — current model
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 ```
 
-**Lesson**
-Always check the [Anthropic docs](https://docs.anthropic.com/en/docs/about-claude/models)
-for the current model ID. Prefer the latest stable model alias rather than
-a version-dated snapshot ID to reduce future maintenance.
+**The lesson**
+Always check the [Anthropic models page](https://docs.anthropic.com/en/docs/about-claude/models)
+for the latest model ID. Dated model IDs get retired — use the current name.
 
 ---
 
-## 5. compare_sources — JSON response truncated
+## 5. Compare tool cut off the response halfway
 
-**Symptom**
-The `compare_sources` tool returned a partial JSON object that cut off mid-string.
-JSON parsing would fail or produce incomplete results.
+**What happened**
+The `compare_sources` tool returned a broken, incomplete JSON object — the
+response just stopped in the middle of a sentence. JSON parsing would fail.
 
-**Root cause**
-`max_tokens` was hardcoded at `800` across all Claude calls. A comparison
-across multiple sources requires outputting a large JSON object (sources array
-+ agreements + contradictions + consensus). 800 tokens is often not enough.
+**Why it happened**
+There was a setting called `max_tokens` that told Claude "stop after this many
+words." It was set to 800 globally for all calls. Comparing multiple sources
+requires Claude to write a lot more — sources, agreements, contradictions,
+and a consensus. 800 was not enough, so Claude got cut off mid-response.
 
-**Fix**
-Made `maxTokens` a configurable option on `claudeText` / `claudeJson`, with a
-default of 2000. For `compare_sources` specifically, set it to 4000:
+**How we fixed it**
+Made the limit configurable per call, and set it much higher for the
+compare tool:
 
 ```typescript
-// In compare.ts
-await claudeJson(prompt, CompareSourcesOutputSchema, {
+// compare.ts — give Claude enough room to write a full comparison
+await claudeJson(prompt, schema, {
+  maxTokens: 4_000,   // raised from the old hardcoded 800
   timeoutMs: 60_000,
-  maxRetries: 3,
-  maxTokens: 4_000,   // ← raised from hardcoded 800
 });
 ```
 
-**Lesson**
-Always size `max_tokens` based on the maximum expected output length of the
-specific call. A single global cap will either waste quota (too high) or
-silently truncate responses (too low).
+**The lesson**
+Don't use one token limit for all Claude calls. Short summaries need ~600,
+but complex structured outputs like comparisons need 2000–4000+. Size the
+limit for what you're actually asking Claude to write.
 
 ---
 
-## 6. Claude — wrapping JSON in markdown fences
+## 6. Claude returned JSON wrapped in code fences
 
-**Symptom**
-`claudeJson` threw `SyntaxError: Unexpected token` when parsing Claude's response.
-Logging the raw response revealed it contained:
+**What happened**
+The code tried to parse Claude's response as JSON, but it kept crashing with
+`SyntaxError: Unexpected token`. Looking at the raw response revealed why:
 
 ~~~
 ```json
-{ "people": [...] }
+{ "people": [...], "organizations": [...] }
 ```
 ~~~
 
-**Root cause**
-Claude sometimes wraps JSON output in markdown code fences even when instructed
-not to. This is a known model behaviour, particularly with smaller or older models.
+Claude wrapped the JSON in markdown code block markers. `JSON.parse` doesn't
+understand markdown — it only understands pure JSON.
 
-**Fix**
-Strip markdown fences before passing to `JSON.parse`:
+**Why it happened**
+Even when you tell Claude "return only JSON", it sometimes adds `` ```json ``
+and `` ``` `` around the output anyway. This is a known behaviour — models
+are trained on lots of markdown content and sometimes add formatting by habit.
+
+**How we fixed it**
+Strip the code fence markers before parsing:
 
 ```typescript
 const clean = text
-  .replace(/^```(?:json)?\s*/i, '')
-  .replace(/\s*```$/, '')
+  .replace(/^```(?:json)?\s*/i, '')  // remove opening ```json
+  .replace(/\s*```$/, '')            // remove closing ```
   .trim();
-const parsed = JSON.parse(clean);
+const parsed = JSON.parse(clean);    // now this works
 ```
 
-**Lesson**
-Never trust that an LLM will follow formatting instructions 100% of the time.
-Always sanitise structured outputs before parsing. Add this stripping to any
-code that parses Claude's text as JSON.
+**The lesson**
+Never fully trust that an AI will follow formatting instructions 100% of the
+time. Always clean up the output before processing it. For JSON specifically,
+always strip markdown fences before calling `JSON.parse`.
 
 ---
 
-## 7. Render — wrong start command (MCP server instead of HTTP)
+## 7. Render deployed successfully but then crashed instantly
 
-**Symptom**
-The Render deploy showed "live" but immediately crashed. Logs showed the process
-exiting with code 0 after less than a second.
+**What happened**
+The Render dashboard showed a successful build and deploy — then immediately
+showed the service as crashed. The logs showed the process exited with code 0
+(success) after less than one second.
 
-**Root cause**
-The initial Render Start Command was `node dist/src/index.js` — the MCP stdio
-server. The stdio server blocks waiting for JSON-RPC messages on stdin. When
-run on Render (where there is no MCP host sending messages), stdin is empty,
-so the process has nothing to do and exits cleanly.
+**Why it happened**
+The start command was set to `node dist/src/index.js` — the MCP server.
 
-**Fix**
-Change the Render Start Command to the HTTP server:
+The MCP server works by sitting and waiting for messages from a host program
+(like Claude Desktop) that communicates through the terminal's standard input
+stream. On Render, there is no host program sending messages — so the server
+started, found nothing to do, and immediately exited cleanly.
 
-```
-# WRONG — MCP server exits immediately with no stdin input
-node dist/src/index.js
+It was like opening a walkie-talkie store in the middle of nowhere and
+waiting for someone to call. Nobody ever calls, so you close up and go home.
 
-# CORRECT — HTTP server binds to a port and stays alive
-node dist/src/server.js
-```
-
-Update via Render dashboard → Service → Settings → Start Command, or in
-`render.yaml`:
+**How we fixed it**
+The MCP server is not a web server. We needed to run the HTTP server instead:
 
 ```yaml
+# render.yaml
+
+# WRONG — MCP server exits immediately when there's no host
+startCommand: node dist/src/index.js
+
+# CORRECT — HTTP server binds to a port and stays running
 startCommand: node dist/src/server.js
 ```
 
-**Lesson**
-MCP stdio servers are not web servers. They are designed to be spawned by a
-host application and communicate over stdin/stdout. They cannot be deployed as
-a long-running HTTP service without wrapping them with an HTTP layer.
+**The lesson**
+MCP servers and HTTP servers are two completely different things. MCP servers
+talk through terminal streams. HTTP servers listen on a network port. For
+web deployment, you need the HTTP server.
 
 ---
 
-## 8. Render — Fastify v5 `.listen()` callback silently ignored
+## 8. The HTTP server started but never responded
 
-**Symptom**
-The HTTP server appeared to start (no crash) but never logged the "server started"
-message and never responded to requests. The Render health check timed out.
+**What happened**
+After switching to the HTTP server, Render showed the service as running —
+but no requests ever got a response. The health check kept timing out. There
+was no error in the logs. Nothing.
 
-**Root cause**
-Fastify v5 changed the API for `.listen()`. In v4, a callback was accepted:
+**Why it happened**
+We upgraded to Fastify version 5, which changed how you start the server.
+
+In the old version (v4), you could start the server like this:
 
 ```typescript
-// v4 — WORKS
+// v4 — WORKED
 app.listen({ port: 3000 }, (err, address) => {
-  if (err) process.exit(1);
-  console.log(`Listening on ${address}`);
+  console.log(`Running on ${address}`);
 });
 ```
 
-In v5, the callback form was **removed**. Passing a callback silently does
-nothing — the server still starts but the callback is never invoked, so no
-startup log is emitted and any error in the callback is lost.
+In version 5, this callback style was **removed without any warning or error**.
+Fastify v5 still started the server internally, but it completely ignored
+the callback — so our startup log was never printed, any startup errors were
+silently lost, and we had no idea the server was even running.
 
-**Fix**
-Use the Promise form:
+**How we fixed it**
+Use the modern Promise style instead of a callback:
 
 ```typescript
 // v5 — CORRECT
@@ -281,351 +298,385 @@ app.listen({ port: PORT, host: '0.0.0.0' })
   .catch(err => { log('error', 'Failed to start', {}, err); process.exit(1); });
 ```
 
-**Lesson**
-When upgrading major framework versions, read the breaking changes section.
-Silent API changes (callback → Promise) are the hardest to debug because the
-code compiles and runs without errors, but the expected side-effect never occurs.
+**The lesson**
+When upgrading a major library version, always read the breaking changes.
+A silent API change (where old code runs without errors but no longer works)
+is one of the hardest bugs to diagnose.
 
 ---
 
-## 9. Render — search returning HTML instead of JSON (504 timeout)
+## 9. Search returned an HTML page instead of JSON
 
-**Symptom**
-The search endpoint returned an error in the browser:
-`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`
+**What happened**
+When clicking "Run" on the search tool in the demo, the browser showed:
+`Error: Unexpected token '<', "<!DOCTYPE "... is not valid JSON`
 
-The client called `response.json()` and got an HTML page instead of JSON.
+The browser was trying to parse an HTML page as JSON.
 
-**Root cause**
-Render's free tier enforces a hard 30-second HTTP request timeout. The search
-tool was fetching 3 URLs, making 3 parallel Claude calls (each up to 30 seconds),
-and in the worst case taking 35–40 seconds total. Render killed the connection
-and returned a `504 Gateway Timeout` HTML error page.
+**Why it happened**
+Render's free tier has a hard rule: **if a request takes longer than 30 seconds,
+Render kills it** and sends back a generic HTML error page (a 504 Gateway Timeout).
 
-The browser-side code called `res.json()` on the HTML response, which immediately
-threw a SyntaxError.
+The search tool was making 3 parallel Claude calls, each of which could take
+up to 30 seconds. In the worst case this took 35–40 seconds total — longer
+than Render's 30-second limit. Render killed the request and returned an HTML
+error page. The browser received that HTML, tried to parse it as JSON, and crashed.
 
-**Fix**
-Two changes:
+**How we fixed it**
 
-1. **Server-side timeout** — race the search against a 25-second deadline so
-   Render never has a chance to return HTML:
+Step 1 — Add a 25-second server-side deadline so **our code** returns an error
+before Render's infrastructure can:
 
 ```typescript
-const timeout = new Promise<never>((_, reject) =>
+const timeout = new Promise((_, reject) =>
   setTimeout(() => reject(new Error('Search timed out.')), 25_000)
 );
-const result = await Promise.race([searchAndSummarize(query, n), timeout]);
+// Whichever finishes first "wins"
+const result = await Promise.race([searchAndSummarize(query), timeout]);
 ```
 
-2. **Client-side guard** — check `Content-Type` before calling `res.json()`:
+Step 2 — In the browser, check that the response is actually JSON before
+trying to parse it:
 
 ```javascript
 const ct = res.headers.get('content-type') || '';
 if (!ct.includes('application/json')) {
-  throw new Error('Server error (' + res.status + '). The request may have timed out.');
+  throw new Error('Server error (' + res.status + '). Try again.');
 }
-const data = await res.json();
+const data = await res.json(); // safe to call now
 ```
 
-**Lesson**
-Never call `res.json()` unconditionally. Always check the Content-Type or
-`res.ok` first. Hosting platforms (Render, AWS ALB, Cloudflare) can intercept
-timed-out or failed requests and return HTML error pages at the infrastructure
-layer, bypassing your application's error handlers entirely.
+**The lesson**
+Always protect against long-running operations on hosted platforms — they all
+have timeouts. Also never call `response.json()` without first checking that
+the response is actually JSON. Infrastructure can return HTML error pages at
+any time.
 
 ---
 
-## 10. Render — DuckDuckGo API blocked on cloud IPs
+## 10. Search always returned zero results on Render
 
-**Symptom**
-After fixing the timeout, the search endpoint returned `{"query":"...","results":[]}` —
-no results for any query, including obvious ones like "Narendra Modi".
+**What happened**
+After fixing the timeout issue, search returned `{"results": []}` for every
+query — even obvious ones like "Narendra Modi" or "Artificial Intelligence".
 
-Testing with `curl` showed the DuckDuckGo Instant Answer API
-(`api.duckduckgo.com`) consistently timing out after 10 seconds from Render's
-server, returning an `AbortError`.
+Testing with curl showed that requests to the DuckDuckGo API were consistently
+timing out after 10 seconds from Render's server.
 
-**Root cause**
-DuckDuckGo's Instant Answer API is designed for desktop clients, not cloud
-servers. Render's shared server IP ranges are likely rate-limited or blocked
-by DuckDuckGo's backend because cloud provider IPs generate disproportionately
-high automated traffic.
+**Why it happened**
+DuckDuckGo's Instant Answer API is designed for apps installed on personal
+computers — not cloud servers. Render's servers share IP addresses with
+thousands of other apps. DuckDuckGo sees traffic from these shared cloud IPs
+as likely automated/bot traffic and blocks or rate-limits them.
 
-**Fix**
-Replaced DuckDuckGo with the **Wikipedia search API** — freely accessible
-from any server, no API key, no rate limits for reasonable use:
+From a laptop the API responds instantly. From Render it just hangs forever.
+
+**How we fixed it**
+Switched from DuckDuckGo to **Wikipedia's free search API** — which is
+publicly accessible from any server, requires no API key, and has no
+restrictions on cloud usage:
 
 ```typescript
-// BEFORE — DuckDuckGo (blocked on Render)
+// BEFORE — DuckDuckGo (blocked on cloud servers)
 const api = `https://api.duckduckgo.com/?q=${query}&format=json`;
 
-// AFTER — Wikipedia full-text search (always accessible)
+// AFTER — Wikipedia (always accessible)
 const api = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${query}&format=json`;
 ```
 
-**Lesson**
-APIs designed for end-user browser/desktop clients often block or throttle
-cloud datacenter IPs. Always test your integrations from a deployed environment,
-not just locally, before considering them production-ready.
+**The lesson**
+Always test your third-party API integrations from the actual deployed server,
+not just your laptop. APIs that work perfectly locally can be blocked on cloud
+servers.
 
 ---
 
-## 11. Search — empty results due to double-fetching
+## 11. Wikipedia results were empty even though the API responded
 
-**Symptom**
-After switching to Wikipedia, search still returned `results: []` even though
-Wikipedia's API responded successfully with article titles.
+**What happened**
+After switching to Wikipedia, the API was responding correctly — we could see
+it returning article titles. But the final results were still `[]`.
 
-**Root cause**
-The code was fetching each article twice:
+**Why it happened**
+The code was fetching each Wikipedia article **twice**:
 
 ```typescript
-// First fetch — result used only for page.finalUrl
-const page = await fetchPageText(r.url, 10_000);
+// First fetch — loaded the full page HTML
+const page = await fetchPageText(r.url);
 
-// Second fetch — summarizeUrl calls fetchPageText internally again
+// Second fetch — summarizeUrl also loads the full page HTML internally!
 const summary = await summarizeUrl(page.finalUrl);
 ```
 
-The combined time for two full Wikipedia article fetches + a Claude call
-exceeded the 25-second timeout, causing `Promise.allSettled` to time out and
-all results to be rejected.
+Nobody noticed that `summarizeUrl` already fetches the URL internally. So
+for each article we were downloading the full Wikipedia HTML page twice —
+each download taking up to 10 seconds. Two downloads + a Claude call = ~25
+seconds per article, which exceeded the 25-second timeout. All results timed
+out, so the array came back empty.
 
-**Fix**
-Remove the redundant first fetch — pass the URL directly to `summarizeUrl`:
+**How we fixed it**
+Remove the first fetch. Pass the URL directly to `summarizeUrl` and let it
+do the one fetch it needs:
 
 ```typescript
-// FIXED — single fetch inside summarizeUrl
+// FIXED — single fetch, not double
 const summary = await summarizeUrl(r.url);
 ```
 
-**Lesson**
-Trace the full call chain through all layers before deploying. A function that
-"fetches a page" may call another function that also fetches the same page
-internally, doubling latency invisibly.
+**The lesson**
+Before deploying, trace every function call all the way down to understand
+what network requests it actually makes. A function called `summarizeUrl`
+obviously fetches the URL — don't fetch it again before calling it.
 
 ---
 
-## 12. Search — wrong Wikipedia article returned
+## 12. Searching "Narendra Modi" returned a cricket stadium
 
-**Symptom**
-Searching "Narendra Modi" returned content about **Narendra Modi Stadium**
-(a cricket ground) instead of the Indian Prime Minister.
+**What happened**
+Searching for "Narendra Modi" (the Indian Prime Minister) returned content
+about the **Narendra Modi Stadium** — a cricket ground in Ahmedabad — as the
+top result.
 
-**Root cause**
-Wikipedia's `opensearch` API returns results by title-prefix matching and
-alphabetical ordering. "Narendra Modi Stadium" comes before "Narendra Modi" in
-alphabetical order and has a high popularity score due to sports traffic, so it
-ranked first.
+**Why it happened**
+We were using Wikipedia's `opensearch` API, which works like an autocomplete —
+it returns results based on how well the title **starts with** your query.
 
-**Fix**
-Switch from `action=opensearch` to `action=query&list=search` — Wikipedia's
-full-text search with proper BM25-like relevance ranking:
+`opensearch` for "Narendra Modi" returns results alphabetically:
+1. Narendra Modi Stadium ← comes first alphabetically
+2. Narendra Modi ← comes second
+
+The stadium article also gets heavy traffic from sports fans, boosting its
+ranking further.
+
+**How we fixed it**
+Switched to Wikipedia's proper **full-text search** API, which ranks results
+by how relevant the entire article is — not just the title order:
 
 ```typescript
-// BEFORE — opensearch (title prefix, alphabetical)
-const api = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${query}`;
+// BEFORE — autocomplete (alphabetical, often wrong)
+action=opensearch&search=narendra+modi
 
-// AFTER — full-text search (relevance-ranked)
-const api = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${query}&format=json`;
+// AFTER — full-text search (relevance-ranked, correct)
+action=query&list=search&srsearch=narendra+modi
 ```
 
-**Lesson**
-"Works for obvious cases" is not the same as "works correctly". Test with
-queries where the naive result would be wrong. Title-prefix search is almost
-never what you want for a general-purpose search feature.
+**The lesson**
+Autocomplete-style search and relevance-ranked search are very different things.
+Always use relevance ranking for a general-purpose search feature, and always
+test with queries where the obvious result is not the first alphabetically.
 
 ---
 
-## 13. Search — too slow (15–25 seconds per query)
+## 13. Search took 15–25 seconds — way too slow
 
-**Symptom**
-Even with correct results, the search endpoint took 15–25 seconds to return,
-making it nearly unusable as a demo.
+**What happened**
+Search was returning correct results now, but users had to wait 15–25 seconds
+for every query. That's far too slow for a demo.
 
-**Root cause**
-For each search result the pipeline was:
-1. Fetch the full Wikipedia HTML page (~200 KB, 2–4 s)
-2. Clean and truncate to 12 000 characters
-3. Send to Claude for summarisation (~8–15 s)
+**Why it happened**
+For each search result, the pipeline was:
+1. Download the full Wikipedia article HTML page (~200KB of HTML — takes 2–4 seconds)
+2. Strip all the HTML tags to get plain text
+3. Take the first 12,000 characters and send them to Claude
+4. Wait for Claude to write a summary (~8–15 seconds)
 
-With 3 results in parallel, the bottleneck was the slowest Claude call.
+Doing this for 3 results in parallel still meant waiting for the slowest one —
+often 20+ seconds total.
 
-**Fix**
-Use Wikipedia's **REST summary API** (`/api/rest_v1/page/summary/:slug`) which
-returns a pre-computed plain-text extract (~100–400 words) in under 500ms.
-Then send only that small extract (~600 chars) to Claude for bullet formatting:
+**How we fixed it**
+Wikipedia already has a separate API that returns a short, clean, pre-written
+summary of every article — no HTML, no cleaning, no processing needed:
 
-```typescript
-// BEFORE — fetch full HTML page + Claude on 12 000 chars (~15s per result)
-const page = await fetchPageText(url, 10_000);        // ~3s
-const summary = await summarizeUrl(page.finalUrl);    // ~12s
-
-// AFTER — Wikipedia extract API + Claude on 600 chars (~3s per result)
-const res = await fetchWithRetry(`/api/rest_v1/page/summary/${slug}`);
-const { extract } = await res.json();                 // ~0.3s
-const summary = await claudeText(`Format as bullets:\n${extract.slice(0, 800)}`);  // ~3s
+```
+https://en.wikipedia.org/api/rest_v1/page/summary/Narendra_Modi
 ```
 
-Total time dropped from 15–25 seconds to **3–8 seconds**.
+This returns a clean 2–3 paragraph text summary in under half a second.
+We then send just that short text (~600 characters) to Claude for bullet
+formatting instead of 12,000 characters.
 
-**Lesson**
-Before building a scrape-and-process pipeline, check whether the source offers
-a structured data API that returns pre-processed content. Wikipedia's REST API
-is an example — it does the heavy lifting of HTML-to-text conversion for you.
+```
+BEFORE:  Download 200KB HTML → strip tags → send 12,000 chars to Claude → wait 15–25s
+AFTER:   Get 600-char summary from Wikipedia API → send to Claude → wait 3–5s
+```
+
+**The lesson**
+Before building a complex scrape-and-process pipeline, check whether the
+website already offers a clean data API. Wikipedia's summary API does all
+the hard work for you. Using it cut search time from 25 seconds to 5 seconds.
 
 ---
 
-## 14. Embedded HTML/JS — escape sequences eaten by TypeScript template literals
+## 14. JavaScript inside the demo page was completely broken
 
-**Symptom**
-JavaScript inside the HTML string in `server.ts` was syntactically broken in
-the browser. The `renderSummary` function failed to match bold text and the
-`compare` URL splitter never split anything.
+**What happened**
+The demo page loaded fine but none of the JavaScript worked. The
+`renderSummary` function never applied bold text. The compare tool never
+split URLs by line. Browser console showed syntax errors in the scripts.
 
-**Root cause**
-The HTML and JavaScript are embedded inside a TypeScript template literal:
+**Why it happened**
+The entire HTML page (including the JavaScript) lives inside a TypeScript
+template literal string (the backtick strings). This creates a problem:
 
-```typescript
-reply.send(`... <script>
-  text.replace(/\*\*(.+?)\*\*/g, ...)  // ← broken in TS template literal
-  urls.split('\n')                      // ← broken in TS template literal
-</script>`);
-```
+When TypeScript sees `\n` inside a backtick string, it converts it to an
+actual newline character. When TypeScript sees `\*`, it just becomes `*`
+(the backslash is removed).
 
-Inside a TypeScript (and JavaScript) template literal, `\*` is not a valid
-escape sequence — TypeScript interprets `\*` as just `*`, silently dropping
-the backslash. Similarly `\n` becomes a real newline character, which is
-invalid inside a string literal in the browser's JS parser.
-
-**Fix**
-Double-escape all backslashes that should appear as-is in the browser's
-JavaScript:
+So this code in TypeScript:
 
 ```typescript
-// BEFORE — TypeScript eats the backslashes
+// What we wrote in TypeScript
 text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
 urls.split('\n')
+```
 
-// AFTER — double-escaped, survives the template literal
+After TypeScript processes the template literal, the browser receives:
+
+```javascript
+// What the browser actually got
+text.replace(/**(.+?)**/g, ...)   // ← broken regex, no backslashes!
+urls.split('
+')                                  // ← actual newline in the middle of a string!
+```
+
+Both are JavaScript syntax errors.
+
+**How we fixed it**
+Use double backslashes in TypeScript so that after TypeScript removes one
+backslash, one is still left for the browser:
+
+```typescript
+// FIXED — double backslash in TypeScript = single backslash in browser
 text.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
 urls.split('\\n')
 ```
 
-In the HTML output, `\\*` becomes `\*` and `\\n` becomes `\n` — which is
-exactly what the browser's JavaScript parser expects.
-
-**Lesson**
-Embedding one language inside another (JS inside an HTML string inside a TS
-template literal) creates three layers of escaping. When debugging mysterious
-syntax errors in embedded scripts, always inspect the raw HTML sent to the
-browser (`view-source:`) to see what the string actually contains after all
-escape processing.
+**The lesson**
+When you put one programming language inside another (JavaScript inside an
+HTML string inside a TypeScript template literal), each layer processes
+the escape characters. Think of it like passing a message through three
+translators — what comes out the end may look nothing like what you wrote.
+Always check the raw HTML the browser receives when debugging embedded scripts.
 
 ---
 
-## 15. Demo UI — Run buttons broken (`event` global not reliable)
+## 15. Clicking "Run" did nothing at all
 
-**Symptom**
-Clicking a Run button did nothing. The browser console showed
-`TypeError: Cannot read properties of undefined (reading 'target')`.
+**What happened**
+Every Run button on the demo page was completely unresponsive. No loading
+state, no results, no errors. Clicking did absolutely nothing. The browser
+console showed: `TypeError: Cannot read properties of undefined (reading 'target')`.
 
-**Root cause**
-The original `onclick` handler referenced `event.target` implicitly:
+**Why it happened**
+The button's click handler called a function that relied on a variable called
+`event` — a built-in browser global that is supposed to represent the current
+click event:
 
 ```html
 <button onclick="call('summarize')">Run</button>
 ```
 
 ```javascript
-async function call(tool) {
-  const btn = event.target;  // ← relies on implicit global `event`
+function call(tool) {
+  const btn = event.target;  // ← assumes "event" global is available
   btn.disabled = true;
-  ...
 }
 ```
 
-The implicit `event` global is unreliable in strict mode and across some
-browser versions. It was `undefined` when the function was called.
+The problem: `event` as a global variable is unreliable. In some browsers and
+in strict mode, it's simply `undefined`. The code crashed on line 1 without
+ever doing anything.
 
-**Fix**
-Pass `this` explicitly from the `onclick` attribute:
+**How we fixed it**
+Pass the button directly using `this`, which always refers to the element
+that was clicked:
 
 ```html
 <button onclick="call('summarize', this)">Run</button>
 ```
 
 ```javascript
-async function call(tool, btn) {   // ← btn is always the clicked element
+function call(tool, btn) {   // btn is passed directly — always works
   btn.disabled = true;
-  ...
 }
 ```
 
-**Lesson**
-Avoid relying on implicit browser globals (`event`, `window.event`). Always
-pass required context explicitly. This also makes the code easier to test
-and understand.
+**The lesson**
+Don't rely on hidden browser globals. Always pass what your function needs
+as a direct argument. `this` in an `onclick` attribute always refers to the
+clicked element — use it.
 
 ---
 
-## 16. Demo UI — results showing raw JSON instead of formatted UI
+## 16. Results showed raw JSON instead of a nice UI
 
-**Symptom**
-Search and compare results appeared as a wall of raw JSON text in a monospace
-box instead of the styled card layout.
+**What happened**
+After clicking Run on the search and compare tools, the result box showed a
+wall of raw JSON text like `{"sources":[{"url":"...","summary":"..."}]}` instead
+of the formatted cards with headings, links, and bullet points.
 
-**Root cause**
-Two separate issues:
+**Why it happened**
+Two things were wrong:
 
-1. The `renderSearch()` and `renderCompare()` JavaScript functions had not been
-   added yet in early commits — the `else` branch (`textContent = JSON.stringify`)
-   was the catch-all.
+**Problem A** — The render functions (`renderSearch`, `renderCompare`) didn't
+exist yet in early versions. The code had a catch-all that just dumped raw JSON.
 
-2. Even after adding the render functions, the `resultEl.className` assignment
-   at the end of the `call()` function **reset the class** from e.g.
-   `result compare show` back to just `result show`, which could affect styling.
-
-**Fix**
-1. Add dedicated render functions for each tool:
+**Problem B** — Even after adding the render functions, there was a subtle bug:
+the code was using `textContent` to write the HTML output instead of `innerHTML`:
 
 ```javascript
-function renderSearch(data) { ... }
-function renderCompare(data) { ... }
+// WRONG — textContent treats everything as plain text
+// HTML tags like <div> and <strong> show up literally on screen
+resultEl.textContent = renderCompare(data);
+
+// CORRECT — innerHTML parses and renders the HTML tags
+resultEl.innerHTML = renderCompare(data);
 ```
 
-2. Call `innerHTML` (not `textContent`) so HTML markup is interpreted:
+`textContent` shows HTML tags as literal characters on screen.
+`innerHTML` actually renders them as visual elements.
+
+**How we fixed it**
+Added the render functions and switched to `innerHTML`:
 
 ```javascript
-resultEl.innerHTML = renderCompare(data);  // renders HTML elements
-// NOT:
-resultEl.textContent = JSON.stringify(data);  // renders plain text
+if (tool === 'compare') {
+  resultEl.innerHTML = renderCompare(data);  // renders the HTML correctly
+}
 ```
 
-**Lesson**
-`textContent` sets raw text (HTML tags are shown literally). `innerHTML` parses
-and renders HTML. Using `textContent` to display HTML-formatted output is a
-common mistake that causes tags to appear as raw text instead of being rendered.
+**The lesson**
+`textContent` and `innerHTML` do very different things. Use `textContent`
+when displaying plain text (safe, no HTML injection risk). Use `innerHTML`
+when displaying HTML that you've built yourself and know is safe.
 
 ---
 
-## Summary — Deployment Checklist
+## Deployment Checklist
 
-Before deploying a project like this, verify:
+Before going live, verify each of these:
 
-- [ ] Entrypoint guard uses `decodeURI(new URL(import.meta.url).pathname)` not a raw string comparison
-- [ ] Claude Desktop config uses absolute path to `node` (`/usr/local/bin/node`)
-- [ ] `ANTHROPIC_API_KEY` is set in all environments (local, Render, CI)
-- [ ] `CLAUDE_MODEL` matches a current, non-deprecated model ID
-- [ ] `max_tokens` is sized per call, not shared globally
-- [ ] Claude JSON responses have markdown fences stripped before `JSON.parse`
-- [ ] `render.yaml` start command points to the HTTP server, not the MCP server
-- [ ] Fastify `listen()` uses the Promise form (v5+)
-- [ ] Every `res.json()` is guarded by a `Content-Type: application/json` check
-- [ ] Long-running endpoints have a server-side timeout (`Promise.race`)
-- [ ] Third-party APIs (DuckDuckGo, etc.) are tested from the actual deployment environment
-- [ ] No redundant fetches (trace the full call chain)
-- [ ] Escape sequences inside embedded `<script>` blocks are double-escaped in TS template literals
-- [ ] `onclick` handlers pass `this` explicitly instead of relying on implicit `event`
-- [ ] Result render functions use `innerHTML`, not `textContent`
+**Node & Environment**
+- [ ] The entrypoint check uses `decodeURI(new URL(import.meta.url).pathname)` — not a raw string comparison
+- [ ] Claude Desktop config uses the full path to node: `/usr/local/bin/node`
+- [ ] `ANTHROPIC_API_KEY` is set in all environments — local, deployed server, and CI
+
+**Claude API**
+- [ ] Model name is current (check the Anthropic docs — old dated IDs get retired)
+- [ ] `max_tokens` is set per call based on how long the response will be
+- [ ] JSON responses strip markdown fences before `JSON.parse`
+
+**Deployment**
+- [ ] The Render/cloud start command points to the **HTTP server**, not the MCP server
+- [ ] Fastify `listen()` uses the Promise form (required in Fastify v5)
+- [ ] Long-running endpoints have a server-side timeout to avoid platform-level HTML errors
+
+**Third-party APIs**
+- [ ] Every external API has been tested from the actual deployed server, not just locally
+- [ ] There are no redundant fetches (trace every function call to see what network requests it makes)
+
+**Frontend**
+- [ ] Every `response.json()` call first checks that the response Content-Type is `application/json`
+- [ ] Backslashes inside embedded `<script>` blocks are double-escaped in TypeScript template literals
+- [ ] `onclick` handlers pass `this` explicitly instead of relying on the `event` global
+- [ ] Rich HTML output uses `innerHTML`, not `textContent`
