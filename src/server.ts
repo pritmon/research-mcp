@@ -113,6 +113,10 @@ app.get('/', async (_req, reply) => {
       color: #e6edf3;
       line-height: 1.7;
     }
+    .result.summary h3 { color: #58a6ff; font-size: 1rem; margin-bottom: 8px; }
+    .result.summary ul { padding-left: 18px; margin: 4px 0; }
+    .result.summary li { margin-bottom: 6px; }
+    .result.summary strong { color: #f0f6fc; }
     footer {
       text-align: center;
       padding: 32px;
@@ -231,13 +235,18 @@ app.get('/', async (_req, reply) => {
           body: JSON.stringify(body),
         });
         const data = await res.json();
-        let display = '';
         if (tool === 'summarize' && data.summary) {
-          display = data.summary;
+          const html = data.summary
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+            .replace(/^- (.+)$/gm, '<li>$1</li>')
+            .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+            .replace(/\n{2,}/g, '<br/>');
+          resultEl.innerHTML = html;
         } else {
-          display = JSON.stringify(data, null, 2);
+          resultEl.textContent = JSON.stringify(data, null, 2);
         }
-        resultEl.textContent = display;
         resultEl.className = res.ok ? 'result show' : 'result error show';
       } catch (e) {
         resultEl.textContent = 'Error: ' + e.message;
