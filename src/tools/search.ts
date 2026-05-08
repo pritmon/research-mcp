@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { fetchWithRetry, fetchPageText } from '../utils/fetch.js';
+import { fetchWithRetry } from '../utils/fetch.js';
 import { summarizeUrl } from './summarize.js';
 import { log } from '../utils/logger.js';
 
@@ -62,10 +62,9 @@ export async function searchAndSummarize(query: string, numResults = 5): Promise
 
   const settled = await Promise.allSettled(
     candidates.slice(0, n).map(async r => {
-      const page = await fetchPageText(r.url, 10_000);
-      const summary = await summarizeUrl(page.finalUrl);
+      const summary = await summarizeUrl(r.url);
       return {
-        url: page.finalUrl,
+        url: r.url,
         title: r.title,
         summary,
         relevance_score: relevanceScore(query, r.title, summary),
