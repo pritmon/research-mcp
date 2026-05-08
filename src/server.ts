@@ -9,18 +9,233 @@ import { log } from './utils/logger.js';
 const app = Fastify({ logger: false });
 
 // ── Health / landing ──────────────────────────────────────────────────────────
+app.get('/health', async (_req, reply) => {
+  reply.type('application/json').send({ name: 'research-mcp', version: '1.0.0', status: 'ok' });
+});
+
 app.get('/', async (_req, reply) => {
-  reply.type('application/json').send({
-    name: 'research-mcp',
-    version: '1.0.0',
-    status: 'ok',
-    tools: [
-      { method: 'POST', path: '/summarize',  body: '{ "url": "https://..." }' },
-      { method: 'POST', path: '/search',     body: '{ "query": "...", "num_results": 3 }' },
-      { method: 'POST', path: '/entities',   body: '{ "text": "..." }' },
-      { method: 'POST', path: '/compare',    body: '{ "urls": ["https://...", "https://..."] }' },
-    ],
-  });
+  reply.type('text/html').send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>research-mcp</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+    }
+    header {
+      background: linear-gradient(135deg, #161b22 0%, #1c2128 100%);
+      border-bottom: 1px solid #30363d;
+      padding: 48px 24px;
+      text-align: center;
+    }
+    header h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.5px; }
+    header h1 span { color: #58a6ff; }
+    header p { margin-top: 12px; color: #8b949e; font-size: 1.05rem; max-width: 560px; margin-inline: auto; margin-top: 12px; }
+    .badges { display: flex; gap: 8px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
+    .badge {
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 0.8rem;
+      color: #58a6ff;
+    }
+    .badge.green { color: #3fb950; }
+    main { max-width: 900px; margin: 48px auto; padding: 0 24px; }
+    h2 { font-size: 1.2rem; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }
+    .tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 20px; margin-bottom: 48px; }
+    .tool-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 24px;
+      transition: border-color 0.2s;
+    }
+    .tool-card:hover { border-color: #58a6ff; }
+    .tool-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .method { background: #1f6feb; color: white; font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+    .path { font-family: 'SF Mono', monospace; font-size: 1rem; color: #58a6ff; font-weight: 600; }
+    .tool-desc { color: #8b949e; font-size: 0.9rem; margin-bottom: 16px; line-height: 1.5; }
+    textarea, input[type=text] {
+      width: 100%;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      color: #e6edf3;
+      font-family: 'SF Mono', monospace;
+      font-size: 0.82rem;
+      padding: 10px 12px;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    textarea:focus, input[type=text]:focus { border-color: #58a6ff; }
+    button {
+      margin-top: 10px;
+      background: #238636;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 20px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #2ea043; }
+    button:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+    .result {
+      margin-top: 12px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 12px;
+      font-family: 'SF Mono', monospace;
+      font-size: 0.78rem;
+      color: #3fb950;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 260px;
+      overflow-y: auto;
+      display: none;
+    }
+    .result.error { color: #f85149; }
+    .result.show { display: block; }
+    footer {
+      text-align: center;
+      padding: 32px;
+      color: #484f58;
+      font-size: 0.85rem;
+      border-top: 1px solid #21262d;
+    }
+    footer a { color: #58a6ff; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🔬 <span>research</span>-mcp</h1>
+    <p>Production-ready AI research API — summarize URLs, extract entities, search the web, and compare sources.</p>
+    <div class="badges">
+      <span class="badge green">● Live</span>
+      <span class="badge">MCP Compatible</span>
+      <span class="badge">Claude Sonnet 4.6</span>
+      <span class="badge">TypeScript</span>
+    </div>
+  </header>
+
+  <main>
+    <h2>Try the API</h2>
+    <div class="tools">
+
+      <!-- Summarize -->
+      <div class="tool-card">
+        <div class="tool-header">
+          <span class="method">POST</span>
+          <span class="path">/summarize</span>
+        </div>
+        <p class="tool-desc">Fetch any public URL and get an AI-generated bullet-point summary.</p>
+        <input type="text" id="summarize-url" placeholder="https://en.wikipedia.org/wiki/Artificial_intelligence" />
+        <button onclick="call('summarize')">Run</button>
+        <pre class="result" id="summarize-result"></pre>
+      </div>
+
+      <!-- Entities -->
+      <div class="tool-card">
+        <div class="tool-header">
+          <span class="method">POST</span>
+          <span class="path">/entities</span>
+        </div>
+        <p class="tool-desc">Extract people, organizations, locations and key concepts from text.</p>
+        <textarea id="entities-text" rows="3" placeholder="Anthropic released Claude 4 in San Francisco alongside OpenAI and Google DeepMind..."></textarea>
+        <button onclick="call('entities')">Run</button>
+        <pre class="result" id="entities-result"></pre>
+      </div>
+
+      <!-- Search -->
+      <div class="tool-card">
+        <div class="tool-header">
+          <span class="method">POST</span>
+          <span class="path">/search</span>
+        </div>
+        <p class="tool-desc">Search DuckDuckGo, fetch results in parallel, and summarize each source.</p>
+        <input type="text" id="search-query" placeholder="Model Context Protocol 2025" />
+        <button onclick="call('search')">Run</button>
+        <pre class="result" id="search-result"></pre>
+      </div>
+
+      <!-- Compare -->
+      <div class="tool-card">
+        <div class="tool-header">
+          <span class="method">POST</span>
+          <span class="path">/compare</span>
+        </div>
+        <p class="tool-desc">Compare multiple URLs and get a structured analysis of agreements and contradictions.</p>
+        <textarea id="compare-urls" rows="3" placeholder="https://en.wikipedia.org/wiki/Artificial_intelligence&#10;https://en.wikipedia.org/wiki/Machine_learning"></textarea>
+        <button onclick="call('compare')">Run</button>
+        <pre class="result" id="compare-result"></pre>
+      </div>
+
+    </div>
+  </main>
+
+  <footer>
+    Built with TypeScript · <a href="https://github.com/pritmon/research-mcp" target="_blank">GitHub</a> · Powered by Claude Sonnet 4.6
+  </footer>
+
+  <script>
+    async function call(tool) {
+      const resultEl = document.getElementById(tool + '-result');
+      const btn = event.target;
+      resultEl.className = 'result show';
+      resultEl.textContent = 'Loading...';
+      btn.disabled = true;
+
+      let url = '/' + tool;
+      let body = {};
+
+      if (tool === 'summarize') {
+        const val = document.getElementById('summarize-url').value.trim();
+        if (!val) { resultEl.textContent = 'Please enter a URL.'; resultEl.className = 'result error show'; btn.disabled = false; return; }
+        body = { url: val };
+      } else if (tool === 'entities') {
+        const val = document.getElementById('entities-text').value.trim();
+        if (!val) { resultEl.textContent = 'Please enter some text.'; resultEl.className = 'result error show'; btn.disabled = false; return; }
+        body = { text: val };
+      } else if (tool === 'search') {
+        const val = document.getElementById('search-query').value.trim();
+        if (!val) { resultEl.textContent = 'Please enter a search query.'; resultEl.className = 'result error show'; btn.disabled = false; return; }
+        body = { query: val, num_results: 3 };
+      } else if (tool === 'compare') {
+        const val = document.getElementById('compare-urls').value.trim();
+        const urls = val.split('\\n').map(u => u.trim()).filter(Boolean);
+        if (urls.length < 2) { resultEl.textContent = 'Please enter at least 2 URLs (one per line).'; resultEl.className = 'result error show'; btn.disabled = false; return; }
+        body = { urls };
+      }
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+        resultEl.className = res.ok ? 'result show' : 'result error show';
+      } catch (e) {
+        resultEl.textContent = 'Error: ' + e.message;
+        resultEl.className = 'result error show';
+      }
+      btn.disabled = false;
+    }
+  </script>
+</body>
+</html>`);
 });
 
 // ── POST /summarize ───────────────────────────────────────────────────────────
