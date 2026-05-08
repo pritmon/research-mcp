@@ -2,7 +2,7 @@
 
 <br/>
 
-<img src="https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/src/anthropic/resources/../../../docs/anthropic-logo.png" width="48" height="48" alt="Anthropic" />
+<h1>🔬</h1>
 
 # research-mcp
 
