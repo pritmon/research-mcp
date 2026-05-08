@@ -217,10 +217,10 @@ app.get('/', async (_req, reply) => {
     function renderSummary(text) {
       return text
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
         .replace(/^## (.+)$/gm, '<h3>$1</h3>')
         .replace(/^- (.+)$/gm, '<li>$1</li>')
-        .replace(/\n\n/g, '<br/>');
+        .replace(/\\n\\n/g, '<br/>');
     }
     function renderEntities(d) {
       return section('People', d.people, 'name') +
@@ -250,7 +250,7 @@ app.get('/', async (_req, reply) => {
         body = { query: val, num_results: 3 };
       } else if (tool === 'compare') {
         const val = document.getElementById('compare-urls').value.trim();
-        const urls = val.split('\n').map(function(u) { return u.trim(); }).filter(Boolean);
+        const urls = val.split('\\n').map(function(u) { return u.trim(); }).filter(Boolean);
         if (urls.length < 2) { resultEl.textContent = 'Please enter at least 2 URLs (one per line).'; resultEl.className = 'result error show'; btn.disabled = false; return; }
         body = { urls: urls };
       }
