@@ -1,7 +1,7 @@
 # Deployment Guide — Problems & Solutions
 
 This is a real story of every problem we hit while building and deploying
-this project, written in plain English. Each problem explains what went wrong,
+this project. Each problem explains what went wrong,
 why it happened, and exactly how we fixed it.
 
 ---
