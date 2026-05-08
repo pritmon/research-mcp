@@ -1,4 +1,4 @@
-# Learning Points — MCP, AI, TypeScript & Building Real Systems
+# MCP, AI, TypeScript & Building Real Systems
 
 Everything we learned while building this project, explained in plain English.
 Colour guide: 🔵 concept · 🟢 tip · 🟣 rule · 🟡 watch out · 🔴 never do this
