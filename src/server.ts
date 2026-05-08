@@ -157,7 +157,7 @@ app.get('/', async (_req, reply) => {
         </div>
         <p class="tool-desc">Fetch any public URL and get an AI-generated bullet-point summary.</p>
         <input type="text" id="summarize-url" placeholder="https://en.wikipedia.org/wiki/Artificial_intelligence" />
-        <button onclick="call('summarize')">Run</button>
+        <button onclick="call('summarize', this)">Run</button>
         <pre class="result summary" id="summarize-result"></pre>
       </div>
 
@@ -169,7 +169,7 @@ app.get('/', async (_req, reply) => {
         </div>
         <p class="tool-desc">Extract people, organizations, locations and key concepts from text.</p>
         <textarea id="entities-text" rows="3" placeholder="Anthropic released Claude 4 in San Francisco alongside OpenAI and Google DeepMind..."></textarea>
-        <button onclick="call('entities')">Run</button>
+        <button onclick="call('entities', this)">Run</button>
         <pre class="result entities" id="entities-result"></pre>
       </div>
 
@@ -181,7 +181,7 @@ app.get('/', async (_req, reply) => {
         </div>
         <p class="tool-desc">Search DuckDuckGo, fetch results in parallel, and summarize each source.</p>
         <input type="text" id="search-query" placeholder="Model Context Protocol 2025" />
-        <button onclick="call('search')">Run</button>
+        <button onclick="call('search', this)">Run</button>
         <pre class="result" id="search-result"></pre>
       </div>
 
@@ -193,7 +193,7 @@ app.get('/', async (_req, reply) => {
         </div>
         <p class="tool-desc">Compare multiple URLs and get a structured analysis of agreements and contradictions.</p>
         <textarea id="compare-urls" rows="3" placeholder="https://en.wikipedia.org/wiki/Artificial_intelligence&#10;https://en.wikipedia.org/wiki/Machine_learning"></textarea>
-        <button onclick="call('compare')">Run</button>
+        <button onclick="call('compare', this)">Run</button>
         <pre class="result" id="compare-result"></pre>
       </div>
 
@@ -205,16 +205,37 @@ app.get('/', async (_req, reply) => {
   </footer>
 
   <script>
-    async function call(tool) {
+    function badge(name, score) {
+      return '<span class="badge-item">' + name + ' <span class="conf">' + Math.round(score * 100) + '%</span></span>';
+    }
+    function section(label, items, key) {
+      if (!items || !items.length) return '';
+      return '<div class="ent-group"><div class="ent-label">' + label + '</div><div class="ent-items">' +
+        items.map(function(i) { return badge(i[key], i.confidence); }).join('') +
+        '</div></div>';
+    }
+    function renderSummary(text) {
+      return text
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^- (.+)$/gm, '<li>$1</li>')
+        .replace(/\n\n/g, '<br/>');
+    }
+    function renderEntities(d) {
+      return section('People', d.people, 'name') +
+        section('Organizations', d.organizations, 'name') +
+        section('Locations', d.locations, 'name') +
+        section('Key Concepts', d.key_concepts, 'concept') +
+        '<div class="ent-group"><div class="ent-label">Sentiment</div><div class="ent-items"><span class="badge-item">' + d.sentiment + '</span></div></div>' +
+        '<div class="ent-group"><div class="ent-label">Language</div><div class="ent-items"><span class="badge-item">' + d.language + '</span></div></div>';
+    }
+    async function call(tool, btn) {
       const resultEl = document.getElementById(tool + '-result');
-      const btn = event.target;
       resultEl.className = 'result show';
       resultEl.textContent = 'Loading...';
       btn.disabled = true;
-
-      let url = '/' + tool;
       let body = {};
-
       if (tool === 'summarize') {
         const val = document.getElementById('summarize-url').value.trim();
         if (!val) { resultEl.textContent = 'Please enter a URL.'; resultEl.className = 'result error show'; btn.disabled = false; return; }
@@ -229,41 +250,21 @@ app.get('/', async (_req, reply) => {
         body = { query: val, num_results: 3 };
       } else if (tool === 'compare') {
         const val = document.getElementById('compare-urls').value.trim();
-        const urls = val.split('\\n').map(u => u.trim()).filter(Boolean);
+        const urls = val.split('\n').map(function(u) { return u.trim(); }).filter(Boolean);
         if (urls.length < 2) { resultEl.textContent = 'Please enter at least 2 URLs (one per line).'; resultEl.className = 'result error show'; btn.disabled = false; return; }
-        body = { urls };
+        body = { urls: urls };
       }
-
       try {
-        const res = await fetch(url, {
+        const res = await fetch('/' + tool, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
         const data = await res.json();
         if (tool === 'summarize' && data.summary) {
-          const html = data.summary
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-            .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-            .replace(/^- (.+)$/gm, '<li>$1</li>')
-            .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
-            .replace(/\n{2,}/g, '<br/>');
-          resultEl.innerHTML = html;
+          resultEl.innerHTML = renderSummary(data.summary);
         } else if (tool === 'entities') {
-          const d = data;
-          const badge = (name, score) => \`<span class="badge-item">\${name} <span class="conf">\${Math.round(score*100)}%</span></span>\`;
-          const section = (label, items, key) => items && items.length
-            ? \`<div class="ent-group"><div class="ent-label">\${label}</div><div class="ent-items">\${items.map(i => badge(i[key], i.confidence)).join('')}</div></div>\`
-            : '';
-          resultEl.innerHTML = \`
-            \${section('People', d.people, 'name')}
-            \${section('Organizations', d.organizations, 'name')}
-            \${section('Locations', d.locations, 'name')}
-            \${section('Key Concepts', d.key_concepts, 'concept')}
-            <div class="ent-group"><div class="ent-label">Sentiment</div><div class="ent-items"><span class="badge-item">\${d.sentiment}</span></div></div>
-            <div class="ent-group"><div class="ent-label">Language</div><div class="ent-items"><span class="badge-item">\${d.language}</span></div></div>
-          \`;
+          resultEl.innerHTML = renderEntities(data);
         } else {
           resultEl.textContent = JSON.stringify(data, null, 2);
         }
