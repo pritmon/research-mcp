@@ -1,3 +1,35 @@
+/**
+ * @module server
+ *
+ * Fastify HTTP server — exposes the research-mcp tools as a REST API.
+ *
+ * Role in the system:
+ *   While `index.ts` serves the same four tools over the MCP stdio transport
+ *   (for use by MCP-compatible hosts), this module makes the same tools
+ *   available over plain HTTP.  This enables:
+ *     - Direct browser access via the built-in interactive landing page (`GET /`).
+ *     - Integration with any HTTP client (curl, Postman, other services).
+ *     - Deployment as a standard web service (Railway, Fly.io, etc.).
+ *
+ * Architecture:
+ *   - Fastify is used instead of Express for its built-in TypeScript support,
+ *     schema-based validation hooks, and significantly faster request throughput.
+ *   - `logger: false` is passed to Fastify because structured logging is handled
+ *     by the shared `log()` utility (stderr NDJSON) rather than Fastify's Pino
+ *     integration, avoiding duplicate log streams.
+ *   - Input validation is done manually with Zod `safeParse` rather than Fastify's
+ *     built-in JSON Schema validation.  This keeps the validation logic in sync
+ *     with the Zod schemas used by the MCP server and the tool implementations.
+ *
+ * Routes:
+ *   GET  /           → Interactive HTML landing page with live API playground
+ *   GET  /health     → JSON health check (name, version, status)
+ *   POST /summarize  → Fetch + AI-summarise a URL
+ *   POST /search     → Wikipedia search + per-result AI summary
+ *   POST /entities   → Named entity extraction from text
+ *   POST /compare    → Multi-URL fetch + summary + cross-source comparison
+ */
+
 import Fastify from 'fastify';
 import { z } from 'zod';
 import { summarizeUrl } from './tools/summarize.js';
@@ -6,13 +38,32 @@ import { extractEntities } from './tools/entities.js';
 import { compareSources } from './tools/compare.js';
 import { log } from './utils/logger.js';
 
+// Why `logger: false`?  Fastify's built-in Pino logger would write to stdout in
+// its own format, competing with our stderr NDJSON logger.  We disable it and
+// route all log output through the shared `log()` utility instead.
 const app = Fastify({ logger: false });
 
 // ── Health / landing ──────────────────────────────────────────────────────────
+
+/**
+ * Health-check endpoint.
+ *
+ * Returns a minimal JSON payload that load balancers and uptime monitors can
+ * poll to verify the process is alive and responding.
+ */
 app.get('/health', async (_req, reply) => {
   reply.type('application/json').send({ name: 'research-mcp', version: '1.0.0', status: 'ok' });
 });
 
+/**
+ * Landing page — interactive HTML API playground.
+ *
+ * Serves a self-contained single-page app (no external dependencies) that lets
+ * users exercise all four API endpoints directly from a browser.  The HTML,
+ * CSS, and inline JavaScript are all embedded in the string literal below.
+ * Comments are intentionally omitted inside the HTML string to keep the
+ * template readable and avoid interfering with the markup.
+ */
 app.get('/', async (_req, reply) => {
   reply.type('text/html').send(`<!DOCTYPE html>
 <html lang="en">
@@ -326,6 +377,16 @@ app.get('/', async (_req, reply) => {
 });
 
 // ── POST /summarize ───────────────────────────────────────────────────────────
+
+/**
+ * Fetch and AI-summarise a single URL.
+ *
+ * Request body: `{ url: string }` (must be a valid absolute URL)
+ * Response:     `{ url: string, summary: string }`
+ *
+ * Zod `safeParse` is used so we can return a structured 400 error with field-
+ * level details rather than letting Fastify's generic error handler respond.
+ */
 app.post('/summarize', async (req, reply) => {
   const parsed = z.object({ url: z.string().url() }).safeParse(req.body);
   if (!parsed.success) return reply.status(400).send({ error: parsed.error.flatten() });
@@ -339,6 +400,22 @@ app.post('/summarize', async (req, reply) => {
 });
 
 // ── POST /search ──────────────────────────────────────────────────────────────
+
+/**
+ * Search Wikipedia and return AI-formatted summaries for each result.
+ *
+ * Request body: `{ query: string, num_results?: number }` (1–8 results)
+ * Response:     `SearchAndSummarizeResult` (query + array of result objects)
+ *
+ * A 25 s `Promise.race` timeout is applied server-side because the search
+ * pipeline (Wikipedia API + N parallel Claude calls) can occasionally run long
+ * when the AI layer is slow.  This prevents Fastify from hanging indefinitely
+ * on an in-flight request while the client has already disconnected.
+ *
+ * Why `Promise.race` here instead of inside `searchAndSummarize`?
+ * The route handler owns the HTTP contract (i.e. the response deadline for this
+ * specific HTTP context); the tool function itself should remain transport-agnostic.
+ */
 app.post('/search', async (req, reply) => {
   const parsed = z.object({
     query: z.string().min(2),
@@ -346,6 +423,8 @@ app.post('/search', async (req, reply) => {
   }).safeParse(req.body);
   if (!parsed.success) return reply.status(400).send({ error: parsed.error.flatten() });
   try {
+    // Race the tool against a hard 25 s deadline to avoid open connections
+    // hanging indefinitely when the Wikipedia API or Claude is slow.
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Search timed out — try a shorter or more specific query.')), 25_000)
     );
@@ -361,6 +440,13 @@ app.post('/search', async (req, reply) => {
 });
 
 // ── POST /entities ────────────────────────────────────────────────────────────
+
+/**
+ * Extract structured named entities and metadata from free text.
+ *
+ * Request body: `{ text: string }` (1–40 000 chars)
+ * Response:     `ExtractedEntities` (people, orgs, locations, concepts, sentiment, language)
+ */
 app.post('/entities', async (req, reply) => {
   const parsed = z.object({ text: z.string().min(1).max(40_000) }).safeParse(req.body);
   if (!parsed.success) return reply.status(400).send({ error: parsed.error.flatten() });
@@ -374,6 +460,18 @@ app.post('/entities', async (req, reply) => {
 });
 
 // ── POST /compare ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch, summarise, and structurally compare 2–6 web sources.
+ *
+ * Request body: `{ urls: string[] }` (2–6 valid absolute URLs)
+ * Response:     `CompareSourcesOutput` (sources, agreements, contradictions,
+ *               consensus, confidence)
+ *
+ * This is the most latency-intensive endpoint (multiple serial Claude calls per
+ * source, then one final comparison call) — callers should expect 15–45 s on
+ * the first request.
+ */
 app.post('/compare', async (req, reply) => {
   const parsed = z.object({
     urls: z.array(z.string().url()).min(2).max(6),
@@ -389,6 +487,13 @@ app.post('/compare', async (req, reply) => {
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Listen on all interfaces (`0.0.0.0`) so the server is reachable inside
+ * containers and on cloud platforms without additional network configuration.
+ * The port defaults to 3000 but can be overridden via the `PORT` environment
+ * variable (e.g. set automatically by Railway, Heroku, Fly.io).
+ */
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 app.listen({ port: PORT, host: '0.0.0.0' })
