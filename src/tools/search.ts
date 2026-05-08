@@ -54,8 +54,14 @@ export async function searchAndSummarize(query: string, numResults = 5): Promise
   const n = Math.max(1, Math.min(8, numResults));
   const api = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1`;
 
-  const res = await fetchWithRetry(api, undefined, { timeoutMs: 10_000, maxRetries: 2 });
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  let json: Record<string, unknown> = {};
+  try {
+    const res = await fetchWithRetry(api, undefined, { timeoutMs: 15_000, maxRetries: 1 });
+    json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  } catch (err) {
+    log('warn', 'DuckDuckGo API unreachable; returning empty results', { query }, err);
+    return { query, results: [] };
+  }
 
   const schema = z.object({
     AbstractURL: z.string().optional(),
