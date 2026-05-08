@@ -40,19 +40,18 @@ function relevanceScore(query: string, title: string, summary: string): number {
 export async function searchAndSummarize(query: string, numResults = 5): Promise<SearchAndSummarizeResult> {
   const n = Math.max(1, Math.min(8, numResults));
 
-  // Wikipedia opensearch — returns titles + page URLs
-  const api = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=${n}&namespace=0&format=json&origin=*`;
+  // Wikipedia full-text search — better relevance ranking than opensearch
+  const api = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=${n}&format=json&origin=*`;
 
   let candidates: Array<{ url: string; title: string }> = [];
   try {
     const res = await fetchWithRetry(api, undefined, { timeoutMs: 10_000, maxRetries: 2 });
-    // opensearch returns [query, [titles], [descriptions], [urls]]
-    const data = (await res.json()) as [string, string[], string[], string[]];
-    const titles = data[1] ?? [];
-    const urls = data[3] ?? [];
-    candidates = titles
-      .map((title, i) => ({ title, url: urls[i] ?? '' }))
-      .filter(r => r.url && r.title);
+    const data = (await res.json()) as { query?: { search?: Array<{ title: string }> } };
+    const hits = data?.query?.search ?? [];
+    candidates = hits.map(h => ({
+      title: h.title,
+      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(h.title.replace(/ /g, '_'))}`,
+    }));
   } catch (err) {
     log('warn', 'Wikipedia search API unreachable', { query }, err);
     return { query, results: [] };

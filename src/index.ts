@@ -40,7 +40,7 @@ export async function main(): Promise<void> {
     {
       title: 'Search and Summarize',
       description:
-        'Use DuckDuckGo Instant Answer API, fetch each result in parallel, and summarize sources.',
+        'Search Wikipedia, fetch each result in parallel, and summarize sources using Claude.',
       inputSchema: SearchAndSummarizeInputSchema,
     },
     async ({ query, num_results }) => {

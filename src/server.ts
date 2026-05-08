@@ -179,7 +179,7 @@ app.get('/', async (_req, reply) => {
           <span class="method">POST</span>
           <span class="path">/search</span>
         </div>
-        <p class="tool-desc">Search DuckDuckGo, fetch results in parallel, and summarize each source.</p>
+        <p class="tool-desc">Search Wikipedia, fetch results in parallel, and summarize each source with AI.</p>
         <input type="text" id="search-query" placeholder="Model Context Protocol 2025" />
         <button onclick="call('search', this)">Run</button>
         <pre class="result search" id="search-result"></pre>
