@@ -1,6 +1,6 @@
 # 🔬 research-mcp
 
-![Node CI](https://img.shields.io/badge/node%20ci-passing-brightgreen?logo=github)
+![Node CI](https://github.com/pritmon/research-mcp/actions/workflows/ci.yml/badge.svg)
 ![Live Demo](https://img.shields.io/badge/live-demo-brightgreen)
 ![MCP](https://img.shields.io/badge/MCP-compatible-blue?logo=anthropic)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
