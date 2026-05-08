@@ -13,6 +13,19 @@ Built with TypeScript, the official [`@modelcontextprotocol/sdk`](https://github
 
 ---
 
+## 🌐 Live Demo
+
+<div align="center">
+
+### [**→ Try it at research-mcp-dbwy.onrender.com**](https://research-mcp-dbwy.onrender.com)
+
+Interactive demo — paste any URL, text, or query and see results instantly.
+No setup. No API key needed. Just open and use.
+
+</div>
+
+---
+
 ## Tools
 
 | Tool | Description |
@@ -42,9 +55,9 @@ npm run build
 
 ---
 
-## Live Demo (REST API)
+## REST API Reference
 
-The server is deployed at **`https://research-mcp-dbwy.onrender.com`** (update after deploy).
+Base URL: **`https://research-mcp-dbwy.onrender.com`**
 
 ```bash
 # Summarize a URL
