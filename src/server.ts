@@ -107,7 +107,7 @@ app.get('/', async (_req, reply) => {
     }
     .result.error { color: #f85149; }
     .result.show { display: block; }
-    .result.entities { font-family: sans-serif; color: #e6edf3; }
+    .result.entities, .result.search, .result.compare { font-family: sans-serif; color: #e6edf3; }
     .result.summary {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 0.88rem;
@@ -182,7 +182,7 @@ app.get('/', async (_req, reply) => {
         <p class="tool-desc">Search DuckDuckGo, fetch results in parallel, and summarize each source.</p>
         <input type="text" id="search-query" placeholder="Model Context Protocol 2025" />
         <button onclick="call('search', this)">Run</button>
-        <pre class="result" id="search-result"></pre>
+        <pre class="result search" id="search-result"></pre>
       </div>
 
       <!-- Compare -->
@@ -194,7 +194,7 @@ app.get('/', async (_req, reply) => {
         <p class="tool-desc">Compare multiple URLs and get a structured analysis of agreements and contradictions.</p>
         <textarea id="compare-urls" rows="3" placeholder="https://en.wikipedia.org/wiki/Artificial_intelligence&#10;https://en.wikipedia.org/wiki/Machine_learning"></textarea>
         <button onclick="call('compare', this)">Run</button>
-        <pre class="result" id="compare-result"></pre>
+        <pre class="result compare" id="compare-result"></pre>
       </div>
 
     </div>
@@ -229,6 +229,43 @@ app.get('/', async (_req, reply) => {
         section('Key Concepts', d.key_concepts, 'concept') +
         '<div class="ent-group"><div class="ent-label">Sentiment</div><div class="ent-items"><span class="badge-item">' + d.sentiment + '</span></div></div>' +
         '<div class="ent-group"><div class="ent-label">Language</div><div class="ent-items"><span class="badge-item">' + d.language + '</span></div></div>';
+    }
+    function renderSearch(data) {
+      if (!data.results || !data.results.length) return '<p style="color:#8b949e">No results found.</p>';
+      return data.results.map(function(r) {
+        return '<div class="ent-group">' +
+          '<a href="' + r.url + '" target="_blank" style="color:#58a6ff;font-family:sans-serif;font-size:0.85rem;">' + r.title + '</a>' +
+          '<div style="color:#3fb950;font-size:0.72rem;font-family:sans-serif;margin:2px 0;">' + Math.round(r.relevance_score * 100) + '% relevant</div>' +
+          '<div style="color:#e6edf3;font-family:sans-serif;font-size:0.82rem;line-height:1.5;margin-top:4px;">' + r.summary.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>') + '</div>' +
+          '</div>';
+      }).join('<hr style="border-color:#30363d;margin:12px 0"/>');
+    }
+    function renderCompare(data) {
+      if (!data) return '';
+      var html = '';
+      if (data.sources) {
+        html += '<div class="ent-group"><div class="ent-label">Sources</div>' +
+          data.sources.map(function(s) {
+            return '<div style="font-family:sans-serif;font-size:0.82rem;margin-bottom:6px;">' +
+              '<a href="' + s.url + '" target="_blank" style="color:#58a6ff;">' + s.url + '</a>' +
+              '<div style="color:#8b949e;margin-top:2px;">' + s.summary + '</div></div>';
+          }).join('') + '</div>';
+      }
+      if (data.agreements && data.agreements.length) {
+        html += '<div class="ent-group"><div class="ent-label">Agreements</div>' +
+          data.agreements.map(function(a) { return '<div style="font-family:sans-serif;font-size:0.82rem;color:#3fb950;margin-bottom:4px;">✓ ' + a + '</div>'; }).join('') + '</div>';
+      }
+      if (data.contradictions && data.contradictions.length) {
+        html += '<div class="ent-group"><div class="ent-label">Contradictions</div>' +
+          data.contradictions.map(function(c) { return '<div style="font-family:sans-serif;font-size:0.82rem;color:#f85149;margin-bottom:4px;">✗ ' + c + '</div>'; }).join('') + '</div>';
+      }
+      if (data.consensus) {
+        html += '<div class="ent-group"><div class="ent-label">Consensus</div><div style="font-family:sans-serif;font-size:0.82rem;color:#e6edf3;">' + data.consensus + '</div></div>';
+      }
+      if (data.confidence) {
+        html += '<div class="ent-group"><div class="ent-label">Confidence</div><span class="badge-item">' + data.confidence + '</span></div>';
+      }
+      return html;
     }
     async function call(tool, btn) {
       const resultEl = document.getElementById(tool + '-result');
@@ -265,6 +302,10 @@ app.get('/', async (_req, reply) => {
           resultEl.innerHTML = renderSummary(data.summary);
         } else if (tool === 'entities') {
           resultEl.innerHTML = renderEntities(data);
+        } else if (tool === 'search') {
+          resultEl.innerHTML = renderSearch(data);
+        } else if (tool === 'compare') {
+          resultEl.innerHTML = renderCompare(data);
         } else {
           resultEl.textContent = JSON.stringify(data, null, 2);
         }
