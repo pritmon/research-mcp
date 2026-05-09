@@ -31,22 +31,33 @@
 
 ---
 
-## What is this?
+## About
 
-**research-mcp** is a production-ready [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude Desktop — and any HTTP client — four powerful research tools:
+**research-mcp** is a production-ready AI research automation server built on the [Model Context Protocol](https://modelcontextprotocol.io). It turns hours of manual research work — reading articles, extracting entities, cross-referencing sources — into seconds of AI-powered automation.
+
+It runs in two modes simultaneously from a single codebase:
+
+- **Claude Desktop** — analysts invoke tools using plain English, no code required
+- **REST API** — any HTTP client, browser, or internal system can call the same tools programmatically
+
+The project is engineered for real production use: every external call has timeouts, exponential backoff with jitter, and graceful partial-failure handling. Structured NDJSON logs go to stderr so MCP protocol traffic on stdout is never corrupted. All inputs and AI outputs are validated with Zod at every boundary.
 
 <br/>
 
 <div align="center">
 
-| &nbsp; | Tool | What it does |
-|:------:|------|-------------|
-| 🔗 | **Summarize URL** | Fetch any webpage and return a structured AI bullet-point summary |
-| 🔍 | **Search & Summarize** | Search Wikipedia, fetch results in parallel, format with Claude |
-| 🧠 | **Extract Entities** | Pull out people, orgs, locations, concepts and sentiment from text |
-| ⚖️ | **Compare Sources** | Fetch multiple URLs and produce agreements, contradictions & consensus |
+| &nbsp; | Tool | What it does | Endpoint |
+|:------:|------|-------------|----------|
+| 🔗 | **Summarize URL** | Fetch any public webpage and return a structured bullet-point summary | `POST /summarize` |
+| 🔍 | **Search & Summarize** | Full-text Wikipedia search with parallel AI-formatted summaries | `POST /search` |
+| 🧠 | **Extract Entities** | Extract people, organisations, locations, concepts, sentiment & language from text | `POST /entities` |
+| ⚖️ | **Compare Sources** | Fetch 2–6 URLs in parallel, summarise each, then produce agreements, contradictions & consensus | `POST /compare` |
 
 </div>
+
+<br/>
+
+**Built with:** TypeScript 5 · Fastify v5 · Claude Sonnet 4.6 · Zod · Cheerio · Node 18/20/22
 
 <br/>
 
@@ -55,34 +66,60 @@
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                        research-mcp                          │
-│                                                              │
-│   MCP clients              HTTP clients                      │
-│  ┌──────────┐             ┌──────────────────────────────┐   │
-│  │  Claude  │             │       Fastify v5             │   │
-│  │  Desktop │             │  POST /summarize             │   │
-│  │  Cursor  │  ←stdio→   │  POST /search                │   │
-│  │  Zed     │             │  POST /entities              │   │
-│  │  Any MCP │             │  POST /compare               │   │
-│  └──────────┘             │  GET  /  (interactive UI)    │   │
-│                           └──────────────────────────────┘   │
-│                                      │                        │
-│                    ┌─────────────────┤                        │
-│                    ▼                 ▼                        │
-│          ┌──────────────────────────────────────┐            │
-│          │             Tool Layer               │            │
-│          │   summarize · search · entities      │            │
-│          │   compare · Zod validation           │            │
-│          └──────────────┬──────────────┬────────┘            │
-│                         │              │                      │
-│                  ┌──────▼───┐   ┌──────▼────────┐            │
-│                  │ Anthropic│   │  Web / Wiki   │            │
-│                  │  Claude  │   │  fetch+parse  │            │
-│                  │  API     │   │  (cheerio)    │            │
-│                  └──────────┘   └───────────────┘            │
-└──────────────────────────────────────────────────────────────┘
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                            research-mcp                                   ║
+╠═════════════════════════════╦═════════════════════════════════════════════╣
+║                             ║                                             ║
+║   💬  MCP Clients           ║   🌐  HTTP Clients                          ║
+║                             ║                                             ║
+║  ┌──────────────────────┐   ║   ┌─────────────────────────────────────┐  ║
+║  │  Claude Desktop      │   ║   │  Fastify v5  (src/server.ts)        │  ║
+║  │  Cursor              │◄──╬──►│                                     │  ║
+║  │  Zed                 │   ║   │  POST  /summarize                   │  ║
+║  │  Any MCP-compatible  │   ║   │  POST  /search                      │  ║
+║  └──────────┬───────────┘   ║   │  POST  /entities                    │  ║
+║             │               ║   │  POST  /compare                     │  ║
+║         stdio               ║   │  GET   /  ← interactive playground  │  ║
+║      (stdin/stdout)         ║   │  GET   /health                      │  ║
+║             │               ║   └──────────────────┬──────────────────┘  ║
+║  ┌──────────▼───────────┐   ║                      │                      ║
+║  │  MCP Server          │   ║                      │                      ║
+║  │  (src/index.ts)      │   ║                      │                      ║
+║  └──────────┬───────────┘   ║                      │                      ║
+║             │               ║                      │                      ║
+╚═════════════╬═══════════════╩══════════════════════╬══════════════════════╝
+              │                                      │
+              └──────────────────┬───────────────────┘
+                                 │
+              ╔══════════════════▼════════════════════╗
+              ║          🔧  Tool Layer                ║
+              ║          (src/tools/)                  ║
+              ║                                        ║
+              ║  🔗 summarize_url   · zod validation   ║
+              ║  🔍 search          · retry logic       ║
+              ║  🧠 extract_entities · partial results  ║
+              ║  ⚖️  compare_sources · parallel fetch   ║
+              ╚══════════════╤═══════════════╤═════════╝
+                             │               │
+              ╔══════════════▼════╗   ╔══════▼══════════════╗
+              ║  🤖  Anthropic    ║   ║  🌍  Web & Wikipedia ║
+              ║  Claude API       ║   ║                      ║
+              ║                   ║   ║  fetch + cheerio     ║
+              ║  Sonnet 4.6       ║   ║  HTML → clean text   ║
+              ║  temp: 0.2        ║   ║  he.decode entities  ║
+              ║  Zod-validated    ║   ║  AbortController     ║
+              ╚═══════════════════╝   ╚══════════════════════╝
 ```
+
+<div align="center">
+
+| Layer | File | Responsibility |
+|-------|------|---------------|
+| Entry points | `src/index.ts` · `src/server.ts` | MCP stdio + Fastify HTTP — thin wiring only |
+| Tools | `src/tools/*.ts` | Business logic — one function in, one result out |
+| Utilities | `src/utils/claude.ts` · `fetch.ts` · `logger.ts` | Shared infrastructure — retries, timeouts, logging |
+
+</div>
 
 ---
 
