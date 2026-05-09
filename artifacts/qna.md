@@ -501,3 +501,233 @@ structuredContent is the data record saved in the accounting system.
 > [!TIP]
 > Return a simple message to the user: "Something went wrong. Please try again."
 > Log the full detailed error server-side only — where only you can see it.
+
+---
+
+## 🛠️ How to Build Something Like This
+
+---
+
+### Where do you start when building an AI-powered server?
+
+> [!TIP]
+> Start from the inside out, not the outside in.
+>
+> **Wrong order:** Build the server first, wire up routes, then wonder what they should do.
+> **Right order:** Write the core logic (one tool, no server), make it work end-to-end,
+> then wrap it in HTTP and MCP.
+>
+> We built `summarizeUrl()` as a plain function first — just input and output.
+> Only after that was proven working did we plug it into Fastify and MCP.
+
+> [!NOTE]
+> The layers in this project reflect that order:
+> - **utils/** first — fetch and Claude wrappers with no business logic
+> - **tools/** second — business logic with no HTTP or MCP awareness
+> - **server.ts / index.ts** last — just thin wiring that connects inputs to outputs
+
+---
+
+### What is the first thing to build when starting a TypeScript project?
+
+> [!IMPORTANT]
+> Set up TypeScript strictly before writing a single line of real code:
+> - `"strict": true` in tsconfig.json from day one
+> - `"module": "NodeNext"` and `"moduleResolution": "NodeNext"` for ESM
+> - `"sourceMap": true` so stack traces point to your `.ts` source, not compiled `.js`
+>
+> Retrofitting strict mode onto an existing codebase is painful.
+> Starting strict means every function you write is correct by design.
+
+> [!WARNING]
+> The most common TypeScript+Node ESM mistake: forgetting `.js` extensions on imports.
+> Write `import { log } from './logger.js'` even though the file is `logger.ts`.
+> Node resolves the compiled output, not the source — so the extension must match
+> what will exist in `dist/`.
+
+---
+
+### How do you build a utility layer that every tool can share?
+
+> [!NOTE]
+> A utility is something that has no opinion about what you are building —
+> it just solves one problem reliably. Good utilities in this project:
+> - `fetchWithRetry` — fetches a URL reliably. Knows nothing about Wikipedia or Claude.
+> - `claudeText` — calls Claude reliably. Knows nothing about summaries or entities.
+> - `log` — writes a structured log line. Knows nothing about routes or tools.
+>
+> If your utility imports from a specific tool, it is no longer a utility — it is
+> business logic that got lost.
+
+> [!TIP]
+> Write each utility as if someone else will use it in a completely different project.
+> That constraint forces you to keep it clean and generic.
+
+---
+
+### How do you design a tool function?
+
+> [!NOTE]
+> Every tool in this project follows the same pattern:
+> 1. **One input, one output** — a plain async function with typed arguments and return value
+> 2. **No side effects beyond logging** — no global state, no writing to disk
+> 3. **Fail partial, not total** — return something useful even when part of the process fails
+> 4. **Return errors as values, not throws** — so callers can display them, not crash on them
+
+> [!TIP]
+> Design the function signature first. Write the types. Then fill in the body.
+> If the function signature is hard to explain in one sentence, split it into two functions.
+
+---
+
+### How do you prompt Claude effectively?
+
+> [!NOTE]
+> Treat your prompt like a job description. The clearer you describe the role, the task,
+> and the output format, the better the response.
+>
+> A good prompt has:
+> 1. **A role** — "You are an enterprise research analyst"
+> 2. **A task** — "Summarise this article for a busy colleague"
+> 3. **Specific requirements** — "5–8 bullet points, each under 20 words"
+> 4. **Constraints** — "Do not add information not in the source text"
+> 5. **The input** — the actual content at the end
+
+> [!IMPORTANT]
+> For JSON outputs, embed the exact schema in the prompt:
+>
+>     Return JSON strictly matching this shape:
+>     { "name": string, "confidence": number }
+>
+> Without this, Claude guesses the shape. With it, ZodError retries drop dramatically.
+
+> [!WARNING]
+> Vague prompts produce vague results. "Summarise this" gives you something. "Summarise
+> this as 5 bullet points, each starting with a bold key term, each under 20 words,
+> for a senior business analyst" gives you something useful.
+
+---
+
+### How do you handle the case where an external API is slow or down?
+
+> [!NOTE]
+> There are three kinds of failure:
+> - **Slow** — the API responds eventually but takes too long. Fix: AbortController timeout.
+> - **Transient** — the API fails briefly then recovers. Fix: retry with exponential backoff.
+> - **Permanent** — the API is genuinely down or you sent bad data. Fix: fail fast, do not retry.
+
+> [!TIP]
+> Build your fetch wrapper before building any tool. Every tool will need it.
+> Adding retry and timeout logic per-tool creates duplication and inconsistency —
+> you end up with five slightly different retry implementations that break in five
+> different ways.
+
+> [!IMPORTANT]
+> The decision tree for retrying:
+> - HTTP 429 or 5xx → retry (server problem, might recover)
+> - HTTP 4xx (except 429) → do not retry (your request is wrong)
+> - Timeout / AbortError → do not retry (server is too slow; retry wastes more time)
+> - Network error (TCP reset, DNS fail) → retry (usually a blip)
+
+---
+
+### What order should you test things as you build?
+
+> [!TIP]
+> Test the smallest piece first, then build outward:
+>
+> 1. **Test the utility** — does `fetchWithRetry` return a page? Does `claudeText` respond?
+> 2. **Test the tool function directly** — call `summarizeUrl("https://en.wikipedia.org/wiki/TypeScript")` from a plain Node script. No server needed.
+> 3. **Test the HTTP route** — use `curl` or Postman before building the UI.
+> 4. **Test the MCP tool** — add it to Claude Desktop config and try it in conversation.
+>
+> Each layer tests the one below it. If step 2 works, step 3 is just wiring.
+> If step 2 is broken, fixing step 4 is impossible.
+
+> [!NOTE]
+> We kept a `test.js` script in the project specifically for step 2.
+> Running `node dist/test.js` after every significant change takes 30 seconds
+> and catches 90% of regressions before they reach the server.
+
+---
+
+### How do you structure error handling across a whole project?
+
+> [!NOTE]
+> Think of error handling in three zones:
+>
+> **Zone 1 — Utilities (fetch, claude):** Retry internally. If all retries fail, throw.
+> The caller should not need to know about retries.
+>
+> **Zone 2 — Tools (summarize, search, entities, compare):** Catch utility errors.
+> Return a plain-English string on failure rather than throwing.
+> Partial results are better than nothing.
+>
+> **Zone 3 — Entry points (server.ts, index.ts):** Catch everything.
+> Return a JSON error response (HTTP) or isError:true response (MCP).
+> The server must never crash because one tool request failed.
+
+> [!CAUTION]
+> If you throw errors all the way up through every layer, a single bad URL in a
+> comparison request of 4 URLs crashes the whole request. Catch early, fail gracefully,
+> keep the service running.
+
+---
+
+### How do you know when your architecture is too complicated?
+
+> [!TIP]
+> This project follows one rule: **add complexity only when the simple version breaks.**
+>
+> - We did not add a cache until repeated fetches were a real measured problem. (We never needed one.)
+> - We did not add a queue until concurrency caused failures. (It never did for this load.)
+> - We did not add a database until we needed to store something across requests. (We never did.)
+>
+> Three files that each do one thing clearly are better than a framework
+> that handles every future requirement imaginable.
+
+> [!WARNING]
+> The most common mistake in junior-to-mid engineers: over-engineering early.
+> Building abstractions for problems that do not exist yet produces code that is
+> harder to read and debug than the simple version would have been.
+
+---
+
+### What does a good development loop look like day-to-day?
+
+> [!TIP]
+> We followed this cycle for every feature:
+>
+> 1. **Write the function signature and return type first** — forces you to think before coding
+> 2. **Implement the happy path** — make it work for the normal case
+> 3. **Add one error case at a time** — what happens if the URL is down? If Claude times out?
+> 4. **Run `npm run build`** — catch TypeScript errors before they become runtime errors
+> 5. **Test with `node dist/test.js`** — verify end-to-end with real external APIs
+> 6. **Commit working code** — small, frequent commits with clear messages
+>
+> Never skip step 4. TypeScript errors that compile away do not show up in step 5
+> until something is already in production.
+
+> [!NOTE]
+> The `--watch` flag in the dev script (`node --watch dist/src/server.js`) restarts
+> the server automatically when compiled files change. Pair it with `tsc --watch`
+> in a separate terminal for an instant feedback loop while developing.
+
+---
+
+### What are the most important things to get right from day one?
+
+> [!IMPORTANT]
+> Five things that cost a lot to retrofit but are free if you start with them:
+>
+> 1. **Strict TypeScript** — catches bugs at compile time, not in production
+> 2. **Zod validation at every boundary** — user input, API responses, Claude outputs
+> 3. **Structured logging to stderr from the start** — essential for debugging on cloud hosts
+> 4. **Secrets in environment variables only** — a single accidental commit can invalidate your whole project
+> 5. **One concern per file** — fetch logic in one file, Claude logic in another, tool logic in another
+
+> [!CAUTION]
+> The most expensive mistake: mixing concerns. A fetch function that also formats
+> summaries, a tool function that also writes logs in its own format, a server route
+> that also contains retry logic. Each shortcut costs 10× the time when you need
+> to change that behaviour later.
