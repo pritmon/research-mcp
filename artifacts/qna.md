@@ -508,7 +508,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### Where do you start when building an AI-powered server?
+### 1. Where do you start when building an AI-powered server?
 
 > [!TIP]
 > Start from the inside out, not the outside in.
@@ -528,7 +528,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is the first thing to build when starting a TypeScript project?
+### 2. What is the first thing to build when starting a TypeScript project?
 
 > [!IMPORTANT]
 > Set up TypeScript strictly before writing a single line of real code:
@@ -547,7 +547,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### How do you build a utility layer that every tool can share?
+### 3. How do you build a utility layer that every tool can share?
 
 > [!NOTE]
 > A utility is something that has no opinion about what you are building —
@@ -565,7 +565,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### How do you design a tool function?
+### 4. How do you design a tool function?
 
 > [!NOTE]
 > Every tool in this project follows the same pattern:
@@ -580,7 +580,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### How do you prompt Claude effectively?
+### 5. How do you prompt Claude effectively?
 
 > [!NOTE]
 > Treat your prompt like a job description. The clearer you describe the role, the task,
@@ -608,7 +608,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### How do you handle the case where an external API is slow or down?
+### 6. How do you handle the case where an external API is slow or down?
 
 > [!NOTE]
 > There are three kinds of failure:
@@ -631,7 +631,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What order should you test things as you build?
+### 7. What order should you test things as you build?
 
 > [!TIP]
 > Test the smallest piece first, then build outward:
@@ -651,7 +651,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### How do you structure error handling across a whole project?
+### 8. How do you structure error handling across a whole project?
 
 > [!NOTE]
 > Think of error handling in three zones:
@@ -674,7 +674,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### How do you know when your architecture is too complicated?
+### 9. How do you know when your architecture is too complicated?
 
 > [!TIP]
 > This project follows one rule: **add complexity only when the simple version breaks.**
@@ -693,7 +693,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What does a good development loop look like day-to-day?
+### 10. What does a good development loop look like day-to-day?
 
 > [!TIP]
 > We followed this cycle for every feature:
@@ -715,7 +715,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What are the most important things to get right from day one?
+### 11. What are the most important things to get right from day one?
 
 > [!IMPORTANT]
 > Five things that cost a lot to retrofit but are free if you start with them:
