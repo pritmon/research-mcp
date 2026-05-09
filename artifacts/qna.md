@@ -19,6 +19,26 @@ Colour guide: 🔵 concept · 🟢 tip · 🟣 rule · 🟡 watch out · 🔴 ne
 Without MCP, every AI app would need its own custom integration for every tool.
 With MCP, one server works everywhere.
 
+Here is how we registered the `summarize_url` tool — the MCP SDK reads the Zod schema
+and automatically exposes it to Claude Desktop:
+
+```typescript
+// src/index.ts
+server.registerTool(
+  'summarize_url',
+  {
+    title: 'Summarize URL',
+    description: 'Fetch a URL, clean HTML, and return an AI-generated summary.',
+    inputSchema: SummarizeUrlInputSchema,   // ← Zod schema, auto-converted to JSON Schema
+    outputSchema: z.string(),
+  },
+  async ({ url }) => {
+    const summary = await summarizeUrl(url);
+    return { content: [{ type: 'text', text: summary }], structuredContent: { summary } };
+  }
+);
+```
+
 ---
 
 ### 2. How does an MCP server talk to Claude Desktop?
@@ -35,6 +55,15 @@ With MCP, one server works everywhere.
 > For a local tool on your own computer, **stdio is simpler** — no ports to configure,
 > no security to set up. This is what we use in this project.
 
+The entire stdio wiring is two lines:
+
+```typescript
+// src/index.ts
+const transport = new StdioServerTransport();
+await server.connect(transport);
+// Claude Desktop now talks to the server via stdin / stdout
+```
+
 ---
 
 ### 3. What is content vs structuredContent in a tool response?
@@ -46,6 +75,14 @@ With MCP, one server works everywhere.
 
 Think of it like a receipt: content is the printed receipt for the customer,
 structuredContent is the data record saved in the accounting system.
+
+```typescript
+// src/index.ts — compare_sources tool handler
+return {
+  content: [{ type: 'text', text: JSON.stringify(out, null, 2) }],  // shown in chat
+  structuredContent: out,                                            // usable as data
+};
+```
 
 ---
 
@@ -60,6 +97,24 @@ structuredContent is the data record saved in the accounting system.
 > If you throw an unhandled error instead, it can crash the entire MCP server
 > process — disconnecting Claude Desktop from all your tools until you restart.
 
+Every tool handler in the project wraps the call in try/catch and returns isError on failure:
+
+```typescript
+// src/index.ts
+async ({ url }) => {
+  try {
+    const summary = await summarizeUrl(url);
+    return { content: [{ type: 'text', text: summary }], structuredContent: { summary } };
+  } catch (err) {
+    log('error', 'summarize_url failed', { url }, err);
+    return {
+      content: [{ type: 'text', text: `Error: ${(err as Error).message}` }],
+      isError: true,   // ← tells Claude this is an error, not a result
+    };
+  }
+}
+```
+
 ---
 
 ### 5. How does MCP know what inputs a tool accepts?
@@ -68,6 +123,24 @@ structuredContent is the data record saved in the accounting system.
 > Every tool has a schema — a description of what data it expects. We define these
 > with Zod. The MCP SDK automatically converts the Zod schema into the format
 > Claude Desktop needs. Define the rules once, they work everywhere.
+
+The schema is defined in the tool file and imported into the MCP registration:
+
+```typescript
+// src/tools/entities.ts — schema defined once
+export const ExtractEntitiesInputSchema = z.object({
+  text: z.string().min(1).max(40_000),
+});
+
+// src/index.ts — reused in MCP registration (SDK converts Zod → JSON Schema)
+server.registerTool(
+  'extract_entities',
+  { inputSchema: ExtractEntitiesInputSchema },
+  async ({ text }) => { ... }
+);
+```
+
+The same schema is also used in the HTTP route — one definition, used everywhere.
 
 ---
 
@@ -87,6 +160,15 @@ structuredContent is the data record saved in the accounting system.
 > Think of claudeText as "just tell me the answer" and claudeJson as
 > "give me the answer in a specific machine-readable form."
 
+```typescript
+// src/tools/summarize.ts — plain text output → use claudeText
+return await claudeText(prompt, { timeoutMs: 30_000, maxRetries: 3 });
+
+// src/tools/entities.ts — structured JSON output → use claudeJson
+return await claudeJson(prompt, EntitiesSchema, { timeoutMs: 30_000, maxRetries: 3 });
+// claudeJson handles: JSON.parse → Zod validation → retry on SyntaxError or ZodError
+```
+
 ---
 
 ### 7. Why is temperature set to 0.2?
@@ -100,6 +182,16 @@ structuredContent is the data record saved in the accounting system.
 > [!TIP]
 > For research and data extraction tasks, keep temperature low (0.1–0.3).
 > You want accuracy, not creativity.
+
+```typescript
+// src/utils/claude.ts — temperature is fixed across all tool calls
+const msg = await client.messages.create({
+  model: CLAUDE_MODEL,
+  max_tokens: maxTokens,
+  temperature: 0.2,   // low = factual; high = creative
+  messages: [{ role: 'user', content: prompt }],
+});
+```
 
 ---
 
@@ -118,6 +210,16 @@ structuredContent is the data record saved in the accounting system.
 > [!CAUTION]
 > Retrying immediately in a tight loop makes things worse — you hammer an already
 > struggling server. Always add a wait between retries.
+
+```typescript
+// src/utils/claude.ts
+function backoffDelayMs(attempt: number, initial: number, max: number): number {
+  const base = Math.min(max, initial * 2 ** attempt); // doubles each attempt
+  const jitter = Math.floor(Math.random() * Math.min(400, base)); // random spread
+  return Math.min(max, base + jitter);
+}
+// attempt=0 → ~400ms, attempt=1 → ~800ms, attempt=2 → ~1600ms (capped at 6000ms)
+```
 
 ---
 
@@ -139,6 +241,16 @@ structuredContent is the data record saved in the accounting system.
 > Too low → response gets cut off mid-sentence. Especially bad for JSON —
 > half a JSON object is completely useless and causes parse errors.
 
+```typescript
+// src/tools/search.ts — small input (800 chars), short output needed → 300 tokens
+summary = await claudeText(bulletPrompt, { timeoutMs: 20_000, maxRetries: 1, maxTokens: 300 });
+
+// src/tools/compare.ts — multiple source summaries + analysis → needs 4000 tokens
+return await claudeJson(prompt, CompareSourcesOutputSchema, {
+  timeoutMs: 60_000, maxRetries: 3, maxTokens: 4_000
+});
+```
+
 ---
 
 ### 10. Which API errors should you retry and which should you stop on?
@@ -155,6 +267,24 @@ structuredContent is the data record saved in the accounting system.
 > [!TIP]
 > Simple rule: if retrying the same request with the same data gets the same
 > error, it is a permanent failure — stop immediately.
+
+```typescript
+// src/utils/claude.ts
+function isRetryableClaudeError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes('timeout') ||      // request timed out
+    msg.includes('rate') ||         // 429 rate limited
+    msg.includes('overloaded') ||   // 529 server busy
+    msg.includes('temporarily') ||
+    msg.includes('network') ||      // TCP/DNS issues
+    msg.includes('econnreset') ||
+    msg.includes('etimedout')
+    // Note: 400, 401, 403 are NOT in this list — they are permanent failures
+  );
+}
+```
 
 ---
 
@@ -177,6 +307,19 @@ structuredContent is the data record saved in the accounting system.
 > Simple rule: TypeScript types tell you what your code expects.
 > Zod checks that reality matches those expectations.
 
+```typescript
+// src/server.ts — without Zod, req.body is untyped; anything could arrive
+app.post('/summarize', async (req, reply) => {
+  const parsed = z.object({ url: z.string().url() }).safeParse(req.body);
+  if (!parsed.success) {
+    return reply.status(400).send({ error: parsed.error.flatten() });
+    // e.g. { fieldErrors: { url: ["Invalid url"] } }
+  }
+  // parsed.data.url is now guaranteed to be a valid URL string
+  const summary = await summarizeUrl(parsed.data.url);
+});
+```
+
 ---
 
 ### 12. What is z.infer and why is it useful?
@@ -194,6 +337,21 @@ structuredContent is the data record saved in the accounting system.
 > Writing a Zod schema AND a separate TypeScript type for the same thing is a
 > maintenance trap — they will drift out of sync over time. Use z.infer instead.
 
+```typescript
+// src/tools/entities.ts — schema defined once, type derived automatically
+export const EntitiesSchema = z.object({
+  people:        z.array(z.object({ name: z.string(), confidence: z.number() })).default([]),
+  organizations: z.array(z.object({ name: z.string(), confidence: z.number() })).default([]),
+  locations:     z.array(z.object({ name: z.string(), confidence: z.number() })).default([]),
+  key_concepts:  z.array(z.object({ concept: z.string(), confidence: z.number() })).default([]),
+  sentiment:     z.string(),
+  language:      z.string(),
+});
+
+// TypeScript type comes for free — no duplication
+export type ExtractedEntities = z.infer<typeof EntitiesSchema>;
+```
+
 ---
 
 ### 13. What is the difference between parse and safeParse?
@@ -206,6 +364,18 @@ structuredContent is the data record saved in the accounting system.
 
 > [!TIP]
 > Use safeParse in route handlers. Use parse everywhere else.
+
+```typescript
+// src/server.ts — safeParse in HTTP route (controlled failure)
+const parsed = z.object({ url: z.string().url() }).safeParse(req.body);
+if (!parsed.success) {
+  return reply.status(400).send({ error: parsed.error.flatten() }); // clean 400
+}
+
+// src/utils/claude.ts — parse inside a utility (throw on failure is fine)
+const { timeoutMs, maxRetries, maxTokens } = ClaudeOptionsSchema.parse(opts ?? {});
+// If opts is invalid, the thrown ZodError is caught by the outer retry loop
+```
 
 ---
 
@@ -221,6 +391,21 @@ structuredContent is the data record saved in the accounting system.
 > crash — "Cannot read properties of undefined" — at compile time, before it
 > ever reaches a real user.
 
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "sourceMap": true,
+    "declaration": true
+  }
+}
+```
+
 ---
 
 ### 15. What is Promise.allSettled vs Promise.all?
@@ -235,6 +420,15 @@ structuredContent is the data record saved in the accounting system.
 > [!TIP]
 > Use Promise.allSettled when partial results are better than nothing. Example:
 > fetching 5 URLs — if one website is down, you still want the other 4 results.
+
+```typescript
+// src/tools/compare.ts — fetch all URLs in parallel; drop failures gracefully
+const pages = await Promise.allSettled(urls.map(u => fetchPageText(u, 10_000)));
+const ok = pages.flatMap(p => (p.status === 'fulfilled' ? [p.value] : []));
+// If 1 of 4 URLs is down, ok has 3 pages — comparison still runs
+
+// contrast: Promise.all would throw on the first failed URL and return nothing
+```
 
 ---
 
@@ -253,6 +447,17 @@ structuredContent is the data record saved in the accounting system.
 > [!TIP]
 > For new TypeScript projects, Fastify is the better default. Both work, but
 > Fastify was designed with TypeScript in mind from the start.
+
+```typescript
+// src/server.ts — minimal Fastify setup
+import Fastify from 'fastify';
+const app = Fastify({ logger: false }); // logger: false because we use our own stderr logger
+
+app.post('/summarize', async (req, reply) => {
+  // async handler — no callback, no next(), just return or reply.send()
+  return reply.send({ summary: '...' });
+});
+```
 
 ---
 
@@ -274,6 +479,19 @@ structuredContent is the data record saved in the accounting system.
 >       .then(address => console.log('Running on', address))
 >       .catch(err => process.exit(1));
 
+```typescript
+// src/server.ts — how we actually start the server
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
+
+app.listen({ port: PORT, host: '0.0.0.0' })
+  .then(address => log('info', 'research-mcp HTTP server started', { address }))
+  .catch(err => {
+    log('error', 'Server failed to start', {}, err);
+    process.exit(1);
+  });
+// host: '0.0.0.0' is required on Render — '127.0.0.1' would be unreachable from outside
+```
+
 ---
 
 ### 18. What does Content-Type: application/json do?
@@ -294,21 +512,27 @@ structuredContent is the data record saved in the accounting system.
 > [!NOTE]
 > Promise.race runs multiple promises at once and returns whichever finishes first.
 > We use this to add a hard deadline to the search endpoint:
->
->     const result = await Promise.race([
->       searchAndSummarize(query),
->       new Promise((_, reject) =>
->         setTimeout(() => reject(new Error('Timed out')), 25000)
->       )
->     ]);
->
-> If search finishes in 10s you get results. If the timer fires first you get
-> a clean JSON error. Either way the request always ends in a predictable time.
 
 > [!IMPORTANT]
 > Hosting platforms like Render have hard request time limits. If your code takes
 > too long, Render kills the connection and returns an HTML error page. Use
 > Promise.race to return a proper JSON error before that happens.
+
+```typescript
+// src/server.ts — hard 25s deadline on the search route
+const timeout = new Promise<never>((_, reject) =>
+  setTimeout(
+    () => reject(new Error('Search timed out — try a shorter or more specific query.')),
+    25_000  // 25s — just under Render's 30s hard limit
+  )
+);
+
+const result = await Promise.race([
+  searchAndSummarize(parsed.data.query, parsed.data.num_results ?? 2),
+  timeout,
+]);
+// Whichever finishes first wins — either results or the timeout error
+```
 
 ---
 
@@ -322,6 +546,23 @@ structuredContent is the data record saved in the accounting system.
 > Once a controller is aborted it is permanently aborted. Reusing it on a
 > retry cancels the new request instantly — before it even starts. Always create
 > a fresh AbortController for every single attempt.
+
+```typescript
+// src/utils/claude.ts — new controller for EVERY attempt
+for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  const controller = new AbortController();           // ← fresh each time
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const msg = await client.messages.create(
+      { model: CLAUDE_MODEL, max_tokens: maxTokens, messages: [...] },
+      { signal: controller.signal }                   // ← attached to this attempt only
+    );
+    return msg;
+  } finally {
+    clearTimeout(t);  // always clear the timer, even on success
+  }
+}
+```
 
 ---
 
@@ -340,6 +581,23 @@ structuredContent is the data record saved in the accounting system.
 > Without Cheerio, Claude would waste most of its reading budget on navigation
 > menus and ads instead of the actual content you care about.
 
+```typescript
+// src/utils/fetch.ts — HTML cleaning pipeline
+export function cleanHtmlToText(html: string): string {
+  const $ = cheerio.load(html);
+  // Remove structural noise — everything in this list adds zero information value
+  $('script, style, noscript, svg, canvas, iframe, nav, footer, header, aside').remove();
+  const text = $('body').text() || $.text();
+  const decoded = he.decode(text);
+  return decoded
+    .replace(/\u00a0/g, ' ')      // non-breaking spaces → regular spaces
+    .replace(/[ \t]+\n/g, '\n')   // trailing whitespace on lines
+    .replace(/\n{3,}/g, '\n\n')   // 3+ blank lines → one blank line
+    .replace(/[ \t]{2,}/g, ' ')   // runs of spaces → single space
+    .trim();
+}
+```
+
 ---
 
 ### 22. Why do we only send the first 12,000 characters to Claude?
@@ -354,6 +612,19 @@ structuredContent is the data record saved in the accounting system.
 > almost always contains the most important information. Less input means faster,
 > cheaper, more focused responses.
 
+```typescript
+// src/tools/summarize.ts
+const snippet = page.text.slice(0, 12_000); // ~3,750 tokens — covers main article content
+if (!snippet) return 'No readable text content found at the URL.';
+
+// For search results Wikipedia's pre-computed extract is already short (~600 chars)
+// so we use 800 chars maximum — even cheaper and faster
+summary = await claudeText(
+  `Summarize this in 4-6 bullet points:\n\n${extract.slice(0, 800)}`,
+  { timeoutMs: 20_000, maxRetries: 1, maxTokens: 300 }
+);
+```
+
 ---
 
 ### 23. What is he.decode() and why is it needed?
@@ -366,6 +637,16 @@ structuredContent is the data record saved in the accounting system.
 > [!WARNING]
 > Without decoding, Claude receives raw HTML entity codes as text and might treat
 > them as meaningful content — because to Claude, they are just the text it was given.
+
+```typescript
+// src/utils/fetch.ts — he.decode is applied after cheerio text extraction
+import he from 'he';
+
+const text = $('body').text() || $.text();
+const decoded = he.decode(text);
+// "AT&amp;T earns $3&nbsp;billion" → "AT&T earns $3 billion"
+// Without this, Claude would see "&amp;" and "&nbsp;" as literal words
+```
 
 ---
 
@@ -384,6 +665,13 @@ structuredContent is the data record saved in the accounting system.
 > stderr is a completely separate stream that Claude Desktop ignores. Logs go to
 > stderr, protocol messages go to stdout — they never interfere with each other.
 
+```typescript
+// src/utils/logger.ts — always write to stderr, never stdout
+process.stderr.write(`${JSON.stringify(event)}\n`);
+// Using process.stderr.write (not console.error) for precise control
+// over the newline sequence and buffering behaviour
+```
+
 ---
 
 ### 25. What is structured logging and why is it better?
@@ -400,6 +688,27 @@ structuredContent is the data record saved in the accounting system.
 > (Datadog, Grafana, CloudWatch) automatically. Plain text logs require writing
 > fragile regex patterns just to extract basic information.
 
+```typescript
+// src/utils/logger.ts — one JSON line per event, every time
+export function log(level: LogLevel, msg: string, data?: Record<string, unknown>, err?: unknown): void {
+  const event: LogEvent = {
+    level,
+    msg,
+    time: new Date().toISOString(),
+    name: 'research-mcp',
+    ...(data ? { data } : {}),
+  };
+  if (err instanceof Error) {
+    event.err = { name: err.name, message: err.message, stack: err.stack };
+  }
+  process.stderr.write(`${JSON.stringify(event)}\n`);
+}
+
+// Usage throughout the codebase:
+log('warn', 'Wikipedia search API unreachable', { query }, err);
+// → {"level":"warn","msg":"Wikipedia search API unreachable","data":{"query":"..."},"err":{...}}
+```
+
 ---
 
 ### 26. What should every error log include?
@@ -411,6 +720,16 @@ structuredContent is the data record saved in the accounting system.
 > - **What was being processed** — the URL, query, or input that caused it
 >
 > The more context you include, the faster you can diagnose and fix the problem.
+
+```typescript
+// src/utils/fetch.ts — context-rich log, not just "something failed"
+log('warn', 'Retryable HTTP status from fetch', {
+  url,           // which URL failed
+  status: res.status,  // what the server returned
+  attempt,       // which retry this was
+  delay,         // how long we'll wait before retrying
+});
+```
 
 ---
 
@@ -427,6 +746,22 @@ structuredContent is the data record saved in the accounting system.
 > [!TIP]
 > Config as code: your deployment settings are version controlled just like your
 > source code. No more "I changed something in the dashboard and forgot what."
+
+```yaml
+# render.yaml — committed to the repository root
+services:
+  - type: web
+    name: research-mcp
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: node dist/src/server.js
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false          # must be set manually in the Render dashboard — never committed
+      - key: NODE_ENV
+        value: production
+    healthCheckPath: /
+```
 
 ---
 
@@ -453,6 +788,21 @@ structuredContent is the data record saved in the accounting system.
 > before they hit real users — and proves your project works for people who
 > have not updated Node yet.
 
+```yaml
+# .github/workflows/ci.yml — matrix builds on every push to main
+strategy:
+  matrix:
+    node-version: [18, 20, 22]
+
+steps:
+  - run: npm ci           # exact versions, every time
+  - run: npm run build    # TypeScript compile
+  - name: Verify dist output exists
+    run: |
+      test -f dist/src/index.js
+      test -f dist/src/server.js
+```
+
 ---
 
 ## 🔒 Security
@@ -469,6 +819,19 @@ structuredContent is the data record saved in the accounting system.
 > [!IMPORTANT]
 > Always use environment variables for API keys. If a key is accidentally committed,
 > revoke it immediately — deleting the file is not enough.
+
+```typescript
+// src/utils/claude.ts — key read from environment at call time, never hardcoded
+export function getClaudeClient(): Anthropic {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error('Missing ANTHROPIC_API_KEY in environment');
+  }
+  return new Anthropic({ apiKey });
+  // Why lazy? If the key is missing, error at call time not at server startup —
+  // so the process can still start and other tools can still work.
+}
+```
 
 ---
 
@@ -487,6 +850,22 @@ structuredContent is the data record saved in the accounting system.
 > Think of it like checking IDs at the door. Once inside, you trust them.
 > But you check everyone before they enter.
 
+```typescript
+// src/server.ts — validate every POST body before touching it
+app.post('/compare', async (req, reply) => {
+  const parsed = z.object({
+    urls: z.array(z.string().url()).min(2).max(6),
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    return reply.status(400).send({ error: parsed.error.flatten() });
+    // e.g. { fieldErrors: { urls: ["Array must contain at least 2 element(s)"] } }
+  }
+  // After this point, parsed.data.urls is guaranteed to be 2–6 valid URLs
+  const result = await compareSources(parsed.data.urls);
+});
+```
+
 ---
 
 ### 32. What should you never include in an API error response?
@@ -501,6 +880,14 @@ structuredContent is the data record saved in the accounting system.
 > [!TIP]
 > Return a simple message to the user: "Something went wrong. Please try again."
 > Log the full detailed error server-side only — where only you can see it.
+
+```typescript
+// src/server.ts — full error logged privately, only message returned to caller
+} catch (err) {
+  log('error', 'POST /search failed', {}, err);  // full stack trace goes to stderr
+  return reply.status(500).send({ error: (err as Error).message }); // only message to user
+}
+```
 
 ---
 
@@ -545,6 +932,15 @@ structuredContent is the data record saved in the accounting system.
 > Node resolves the compiled output, not the source — so the extension must match
 > what will exist in `dist/`.
 
+```typescript
+// src/utils/fetch.ts — .js extension on every local import, even though source is .ts
+import { log } from './logger.js';
+
+// src/tools/summarize.ts
+import { claudeText } from '../utils/claude.js';
+import { fetchPageText } from '../utils/fetch.js';
+```
+
 ---
 
 ### 35. How do you build a utility layer that every tool can share?
@@ -578,6 +974,22 @@ structuredContent is the data record saved in the accounting system.
 > Design the function signature first. Write the types. Then fill in the body.
 > If the function signature is hard to explain in one sentence, split it into two functions.
 
+```typescript
+// src/tools/summarize.ts — clean function signature, error returned as string not thrown
+export async function summarizeUrl(url: string): Promise<string> {
+  const page = await fetchPageText(url, 10_000);
+
+  if (page.status >= 400) {
+    return `Failed to fetch URL (status ${page.status}).`; // error as value, not throw
+  }
+
+  const snippet = page.text.slice(0, 12_000);
+  if (!snippet) return 'No readable text content found at the URL.';
+
+  return await claudeText(prompt, { timeoutMs: 30_000, maxRetries: 3 });
+}
+```
+
 ---
 
 ### 37. How do you prompt Claude effectively?
@@ -606,6 +1018,36 @@ structuredContent is the data record saved in the accounting system.
 > this as 5 bullet points, each starting with a bold key term, each under 20 words,
 > for a senior business analyst" gives you something useful.
 
+```typescript
+// src/tools/summarize.ts — structured prompt with role + requirements + input
+const prompt = [
+  'You are an enterprise research assistant.',
+  'Summarize the source for a busy analyst.',
+  '',
+  'Requirements:',
+  '- Output 5-8 bullet points, each <= 20 words.',
+  '- Include: key claims, important numbers, and any caveats/limitations.',
+  '- Do not hallucinate; if uncertain, say so.',
+  '',
+  `Source URL: ${page.finalUrl}`,
+  `Content-Type: ${page.contentType ?? 'unknown'}`,
+  '',
+  'Content (cleaned/plain text):',
+  snippet,
+].join('\n');
+
+// src/tools/entities.ts — embed schema directly for JSON outputs
+const prompt = [
+  'Extract structured entities from the provided text.',
+  '',
+  'Output JSON schema:',
+  JSON.stringify(EntitiesSchema.shape, null, 2), // ← schema in prompt = fewer ZodError retries
+  '',
+  'Text:',
+  text,
+].join('\n');
+```
+
 ---
 
 ### 38. How do you handle the case where an external API is slow or down?
@@ -629,6 +1071,19 @@ structuredContent is the data record saved in the accounting system.
 > - Timeout / AbortError → do not retry (server is too slow; retry wastes more time)
 > - Network error (TCP reset, DNS fail) → retry (usually a blip)
 
+```typescript
+// src/utils/fetch.ts — retry decision built into the fetch wrapper
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status <= 599);
+  // 4xx (except 429) are NOT retried — bad request won't improve on retry
+}
+
+// AbortError check — do not retry timeouts
+const isAbort = err instanceof Error && err.name === 'AbortError';
+const canRetry = attempt < maxRetries && !isAbort;
+if (!canRetry) throw err;
+```
+
 ---
 
 ### 39. What order should you test things as you build?
@@ -648,6 +1103,13 @@ structuredContent is the data record saved in the accounting system.
 > We kept a `test.js` script in the project specifically for step 2.
 > Running `node dist/test.js` after every significant change takes 30 seconds
 > and catches 90% of regressions before they reach the server.
+
+```bash
+# Step 3 — test the HTTP route with curl before touching the UI
+curl -X POST https://your-app.onrender.com/summarize \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://en.wikipedia.org/wiki/TypeScript"}'
+```
 
 ---
 
@@ -671,6 +1133,22 @@ structuredContent is the data record saved in the accounting system.
 > If you throw errors all the way up through every layer, a single bad URL in a
 > comparison request of 4 URLs crashes the whole request. Catch early, fail gracefully,
 > keep the service running.
+
+```typescript
+// Zone 1 — utility throws after all retries exhausted
+throw lastErr instanceof Error ? lastErr : new Error('claudeText failed');
+
+// Zone 2 — tool catches and returns a string instead of throwing
+if (page.status >= 400) {
+  return `Failed to fetch URL (status ${page.status}).`;
+}
+
+// Zone 3 — entry point catches and returns protocol-appropriate error
+} catch (err) {
+  return reply.status(500).send({ error: (err as Error).message }); // HTTP
+  return { content: [...], isError: true };                          // MCP
+}
+```
 
 ---
 
@@ -712,6 +1190,15 @@ structuredContent is the data record saved in the accounting system.
 > The `--watch` flag in the dev script (`node --watch dist/src/server.js`) restarts
 > the server automatically when compiled files change. Pair it with `tsc --watch`
 > in a separate terminal for an instant feedback loop while developing.
+
+```bash
+# Two terminals — instant feedback loop
+# Terminal 1: recompile on every .ts save
+npx tsc --watch
+
+# Terminal 2: restart server on every compiled .js change
+node --watch --enable-source-maps dist/src/server.js
+```
 
 ---
 
