@@ -1,6 +1,6 @@
 # MCP, AI, TypeScript & Building Real Systems
 
-Everything we learned while building this project, explained in plain English.
+Everything we learned while building this project.
 Colour guide: 🔵 concept · 🟢 tip · 🟣 rule · 🟡 watch out · 🔴 never do this
 
 ---
