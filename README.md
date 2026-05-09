@@ -66,37 +66,39 @@ The project is engineered for real production use: every external call has timeo
 ## Architecture
 
 ```mermaid
+%%{init: { 'theme': 'dark', 'themeVariables': { 'fontSize': '18px', 'fontFamily': 'ui-monospace, monospace' } }}%%
+
 flowchart TD
-    subgraph CLIENTS["☁️  Clients"]
-        CD["💬 Claude Desktop\nCursor · Zed · Any MCP host"]
-        HC["🌐 Browser · Postman\nInternal services"]
+    subgraph CLIENTS["☁️   Clients"]
+        CD["💬  Claude Desktop\n\nCursor  ·  Zed  ·  Any MCP host"]
+        HC["🌐  Browser  ·  Postman\n\nInternal services  ·  curl"]
     end
 
-    subgraph ENTRY["🟣  Entry Points"]
-        MCP["🔌 MCP Server\nsrc/index.ts\nStdioServerTransport\n4 registered tools"]
-        HTTP["⚡ Fastify v5\nsrc/server.ts\nPOST /summarize · POST /search\nPOST /entities · POST /compare\nGET / playground · GET /health"]
+    subgraph ENTRY["🟣   Entry Points"]
+        MCP["🔌  MCP Server\n\nsrc/index.ts\nStdioServerTransport\n4 registered tools"]
+        HTTP["⚡  Fastify v5\n\nsrc/server.ts\nPOST /summarize  ·  POST /search\nPOST /entities  ·  POST /compare\nGET /  playground  ·  GET /health"]
     end
 
-    subgraph TOOLS["🔵  Tool Layer  —  src/tools/"]
-        SUM["🔗 summarize_url\nFetch → clean HTML → bullet summary"]
-        SCH["🔍 search_and_summarize\nWikipedia full-text → parallel AI format"]
-        ENT["🧠 extract_entities\nNER · sentiment · language · confidence"]
-        CMP["⚖️ compare_sources\nParallel fetch → summarise → consensus"]
+    subgraph TOOLS["🔵   Tool Layer  —  src/tools/"]
+        SUM["🔗  summarize_url\n\nFetch  →  clean HTML  →  bullet summary"]
+        SCH["🔍  search_and_summarize\n\nWikipedia full-text  →  parallel AI format"]
+        ENT["🧠  extract_entities\n\nNER  ·  sentiment  ·  language  ·  confidence"]
+        CMP["⚖️  compare_sources\n\nParallel fetch  →  summarise  →  consensus"]
     end
 
-    subgraph UTILS["🟢  Utility Layer  —  src/utils/"]
-        CL["🤖 claude.ts\nclaudeText · claudeJson\nRetry · backoff · Zod validation"]
-        FT["🌍 fetch.ts\nfetchWithRetry · fetchPageText\nCheerio · he.decode · AbortController"]
-        LG["📋 logger.ts\nNDJSON → stderr\ndebug · info · warn · error"]
+    subgraph UTILS["🟢   Utility Layer  —  src/utils/"]
+        CL["🤖  claude.ts\n\nclaudeText  ·  claudeJson\nRetry  ·  backoff  ·  Zod validation"]
+        FT["🌍  fetch.ts\n\nfetchWithRetry  ·  fetchPageText\nCheerio  ·  he.decode  ·  AbortController"]
+        LG["📋  logger.ts\n\nNDJSON  →  stderr\ndebug  ·  info  ·  warn  ·  error"]
     end
 
-    subgraph EXT["🟠  External APIs"]
-        ANT["Anthropic Claude API\nSonnet 4.6 · temp 0.2\nmax_tokens per call"]
-        WEB["Wikipedia REST API\n+ Public web pages\nHTTPS · JSON · HTML"]
+    subgraph EXT["🟠   External APIs"]
+        ANT["🤖  Anthropic Claude API\n\nSonnet 4.6  ·  temp 0.2\nmax_tokens per call  ·  Zod-validated"]
+        WEB["🌐  Wikipedia REST API\n\n+ Public web pages\nHTTPS  ·  JSON  ·  HTML"]
     end
 
-    CD -- "stdio\nstdin / stdout" --> MCP
-    HC -- "HTTPS\napplication/json" --> HTTP
+    CD -- "stdio  /  stdin · stdout" --> MCP
+    HC -- "HTTPS  /  application·json" --> HTTP
 
     MCP --> SUM & SCH & ENT & CMP
     HTTP --> SUM & SCH & ENT & CMP
@@ -108,11 +110,11 @@ flowchart TD
     CL --> ANT
     FT --> WEB
 
-    classDef clients  fill:#1e293b,stroke:#64748b,color:#cbd5e1
-    classDef entry    fill:#2e1065,stroke:#7c3aed,color:#e9d5ff
-    classDef tool     fill:#0c2340,stroke:#3b82f6,color:#bfdbfe
-    classDef utility  fill:#052e16,stroke:#16a34a,color:#bbf7d0
-    classDef external fill:#431407,stroke:#f97316,color:#fed7aa
+    classDef clients  fill:#1e293b,stroke:#64748b,color:#cbd5e1,font-size:18px
+    classDef entry    fill:#2e1065,stroke:#7c3aed,color:#e9d5ff,font-size:18px
+    classDef tool     fill:#0c2340,stroke:#3b82f6,color:#bfdbfe,font-size:18px
+    classDef utility  fill:#052e16,stroke:#16a34a,color:#bbf7d0,font-size:18px
+    classDef external fill:#431407,stroke:#f97316,color:#fed7aa,font-size:18px
 
     class CD,HC clients
     class MCP,HTTP entry
