@@ -65,59 +65,70 @@ The project is engineered for real production use: every external call has timeo
 
 ## Architecture
 
-```
-╔═══════════════════════════════════════════════════════════════════════════╗
-║                            research-mcp                                   ║
-╠═════════════════════════════╦═════════════════════════════════════════════╣
-║                             ║                                             ║
-║   💬  MCP Clients           ║   🌐  HTTP Clients                          ║
-║                             ║                                             ║
-║  ┌──────────────────────┐   ║   ┌─────────────────────────────────────┐  ║
-║  │  Claude Desktop      │   ║   │  Fastify v5  (src/server.ts)        │  ║
-║  │  Cursor              │◄──╬──►│                                     │  ║
-║  │  Zed                 │   ║   │  POST  /summarize                   │  ║
-║  │  Any MCP-compatible  │   ║   │  POST  /search                      │  ║
-║  └──────────┬───────────┘   ║   │  POST  /entities                    │  ║
-║             │               ║   │  POST  /compare                     │  ║
-║         stdio               ║   │  GET   /  ← interactive playground  │  ║
-║      (stdin/stdout)         ║   │  GET   /health                      │  ║
-║             │               ║   └──────────────────┬──────────────────┘  ║
-║  ┌──────────▼───────────┐   ║                      │                      ║
-║  │  MCP Server          │   ║                      │                      ║
-║  │  (src/index.ts)      │   ║                      │                      ║
-║  └──────────┬───────────┘   ║                      │                      ║
-║             │               ║                      │                      ║
-╚═════════════╬═══════════════╩══════════════════════╬══════════════════════╝
-              │                                      │
-              └──────────────────┬───────────────────┘
-                                 │
-              ╔══════════════════▼════════════════════╗
-              ║          🔧  Tool Layer                ║
-              ║          (src/tools/)                  ║
-              ║                                        ║
-              ║  🔗 summarize_url   · zod validation   ║
-              ║  🔍 search          · retry logic       ║
-              ║  🧠 extract_entities · partial results  ║
-              ║  ⚖️  compare_sources · parallel fetch   ║
-              ╚══════════════╤═══════════════╤═════════╝
-                             │               │
-              ╔══════════════▼════╗   ╔══════▼══════════════╗
-              ║  🤖  Anthropic    ║   ║  🌍  Web & Wikipedia ║
-              ║  Claude API       ║   ║                      ║
-              ║                   ║   ║  fetch + cheerio     ║
-              ║  Sonnet 4.6       ║   ║  HTML → clean text   ║
-              ║  temp: 0.2        ║   ║  he.decode entities  ║
-              ║  Zod-validated    ║   ║  AbortController     ║
-              ╚═══════════════════╝   ╚══════════════════════╝
+```mermaid
+flowchart TD
+    subgraph CLIENTS["☁️  Clients"]
+        CD["💬 Claude Desktop\nCursor · Zed · Any MCP host"]
+        HC["🌐 Browser · Postman\nInternal services"]
+    end
+
+    subgraph ENTRY["🟣  Entry Points"]
+        MCP["🔌 MCP Server\nsrc/index.ts\nStdioServerTransport\n4 registered tools"]
+        HTTP["⚡ Fastify v5\nsrc/server.ts\nPOST /summarize · POST /search\nPOST /entities · POST /compare\nGET / playground · GET /health"]
+    end
+
+    subgraph TOOLS["🔵  Tool Layer  —  src/tools/"]
+        SUM["🔗 summarize_url\nFetch → clean HTML → bullet summary"]
+        SCH["🔍 search_and_summarize\nWikipedia full-text → parallel AI format"]
+        ENT["🧠 extract_entities\nNER · sentiment · language · confidence"]
+        CMP["⚖️ compare_sources\nParallel fetch → summarise → consensus"]
+    end
+
+    subgraph UTILS["🟢  Utility Layer  —  src/utils/"]
+        CL["🤖 claude.ts\nclaudeText · claudeJson\nRetry · backoff · Zod validation"]
+        FT["🌍 fetch.ts\nfetchWithRetry · fetchPageText\nCheerio · he.decode · AbortController"]
+        LG["📋 logger.ts\nNDJSON → stderr\ndebug · info · warn · error"]
+    end
+
+    subgraph EXT["🟠  External APIs"]
+        ANT["Anthropic Claude API\nSonnet 4.6 · temp 0.2\nmax_tokens per call"]
+        WEB["Wikipedia REST API\n+ Public web pages\nHTTPS · JSON · HTML"]
+    end
+
+    CD -- "stdio\nstdin / stdout" --> MCP
+    HC -- "HTTPS\napplication/json" --> HTTP
+
+    MCP --> SUM & SCH & ENT & CMP
+    HTTP --> SUM & SCH & ENT & CMP
+
+    SUM & SCH & ENT & CMP --> CL
+    SUM & SCH & CMP --> FT
+    SUM & SCH & ENT & CMP -.-> LG
+
+    CL --> ANT
+    FT --> WEB
+
+    classDef clients  fill:#1e293b,stroke:#64748b,color:#cbd5e1
+    classDef entry    fill:#2e1065,stroke:#7c3aed,color:#e9d5ff
+    classDef tool     fill:#0c2340,stroke:#3b82f6,color:#bfdbfe
+    classDef utility  fill:#052e16,stroke:#16a34a,color:#bbf7d0
+    classDef external fill:#431407,stroke:#f97316,color:#fed7aa
+
+    class CD,HC clients
+    class MCP,HTTP entry
+    class SUM,SCH,ENT,CMP tool
+    class CL,FT,LG utility
+    class ANT,WEB external
 ```
 
 <div align="center">
 
-| Layer | File | Responsibility |
-|-------|------|---------------|
-| Entry points | `src/index.ts` · `src/server.ts` | MCP stdio + Fastify HTTP — thin wiring only |
-| Tools | `src/tools/*.ts` | Business logic — one function in, one result out |
-| Utilities | `src/utils/claude.ts` · `fetch.ts` · `logger.ts` | Shared infrastructure — retries, timeouts, logging |
+| Colour | Layer | Files | Role |
+|--------|-------|-------|------|
+| 🟣 Purple | Entry points | `src/index.ts` · `src/server.ts` | Thin wiring — MCP stdio and Fastify HTTP |
+| 🔵 Blue | Tool layer | `src/tools/*.ts` | Business logic — one function in, one result out |
+| 🟢 Green | Utility layer | `src/utils/*.ts` | Shared infra — retries, timeouts, logging |
+| 🟠 Orange | External APIs | Anthropic · Wikipedia | AI inference and data retrieval |
 
 </div>
 
