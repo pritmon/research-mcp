@@ -9,7 +9,7 @@ Colour guide: 🔵 concept · 🟢 tip · 🟣 rule · 🟡 watch out · 🔴 ne
 
 ---
 
-### What is MCP and why does it exist?
+### 1. What is MCP and why does it exist?
 
 > [!NOTE]
 > MCP is a universal plug socket for AI tools. You write the tool once as an MCP
@@ -21,7 +21,7 @@ With MCP, one server works everywhere.
 
 ---
 
-### How does an MCP server talk to Claude Desktop?
+### 2. How does an MCP server talk to Claude Desktop?
 
 > [!NOTE]
 > There are two ways:
@@ -37,7 +37,7 @@ With MCP, one server works everywhere.
 
 ---
 
-### What is content vs structuredContent in a tool response?
+### 3. What is content vs structuredContent in a tool response?
 
 > [!NOTE]
 > When a tool returns data, it sends two versions:
@@ -49,7 +49,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What does isError: true mean?
+### 4. What does isError: true mean?
 
 > [!IMPORTANT]
 > When a tool fails, return isError: true instead of throwing an error.
@@ -62,7 +62,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### How does MCP know what inputs a tool accepts?
+### 5. How does MCP know what inputs a tool accepts?
 
 > [!NOTE]
 > Every tool has a schema — a description of what data it expects. We define these
@@ -75,7 +75,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is the difference between claudeText and claudeJson?
+### 6. What is the difference between claudeText and claudeJson?
 
 > [!NOTE]
 > - **claudeText** — asks Claude something and gives you back the raw text answer.
@@ -89,7 +89,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### Why is temperature set to 0.2?
+### 7. Why is temperature set to 0.2?
 
 > [!NOTE]
 > Temperature controls how creative Claude is:
@@ -103,7 +103,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is exponential backoff and why do we use it?
+### 8. What is exponential backoff and why do we use it?
 
 > [!NOTE]
 > When an API call fails, you wait before retrying — and wait longer each time:
@@ -121,7 +121,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is max_tokens and how do you set it?
+### 9. What is max_tokens and how do you set it?
 
 > [!NOTE]
 > max_tokens tells Claude "stop writing after this many words." (roughly 3/4 of a word per token)
@@ -141,7 +141,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### Which API errors should you retry and which should you stop on?
+### 10. Which API errors should you retry and which should you stop on?
 
 > [!IMPORTANT]
 > | Error | Meaning | Action |
@@ -162,7 +162,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### Why use Zod when TypeScript already has types?
+### 11. Why use Zod when TypeScript already has types?
 
 > [!NOTE]
 > TypeScript types disappear completely when the code runs. They only help while
@@ -179,7 +179,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is z.infer and why is it useful?
+### 12. What is z.infer and why is it useful?
 
 > [!NOTE]
 > z.infer generates a TypeScript type automatically from your Zod schema —
@@ -196,7 +196,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is the difference between parse and safeParse?
+### 13. What is the difference between parse and safeParse?
 
 > [!NOTE]
 > Both validate data. The difference is what happens on failure:
@@ -209,7 +209,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is TypeScript strict mode?
+### 14. What is TypeScript strict mode?
 
 > [!NOTE]
 > "strict": true in tsconfig.json turns on extra safety checks:
@@ -223,7 +223,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is Promise.allSettled vs Promise.all?
+### 15. What is Promise.allSettled vs Promise.all?
 
 > [!NOTE]
 > Both run multiple async operations at the same time. The difference is what
@@ -242,7 +242,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### Why Fastify and not Express?
+### 16. Why Fastify and not Express?
 
 > [!NOTE]
 > - 2–3 times faster than Express
@@ -256,7 +256,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What broke in Fastify version 5?
+### 17. What broke in Fastify version 5?
 
 > [!WARNING]
 > In v4 you could pass a callback to .listen(). In v5 this callback was removed
@@ -276,7 +276,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What does Content-Type: application/json do?
+### 18. What does Content-Type: application/json do?
 
 > [!NOTE]
 > It tells the server what format the request body is in. Without this header,
@@ -289,7 +289,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is Promise.race and why use it for timeouts?
+### 19. What is Promise.race and why use it for timeouts?
 
 > [!NOTE]
 > Promise.race runs multiple promises at once and returns whichever finishes first.
@@ -312,7 +312,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is AbortController and why create a new one per retry?
+### 20. What is AbortController and why create a new one per retry?
 
 > [!NOTE]
 > AbortController cancels a fetch request that is taking too long. You attach
@@ -329,7 +329,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What does Cheerio do?
+### 21. What does Cheerio do?
 
 > [!NOTE]
 > Cheerio strips all the junk from a web page — scripts, styles, navbars, footers,
@@ -342,7 +342,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### Why do we only send the first 12,000 characters to Claude?
+### 22. Why do we only send the first 12,000 characters to Claude?
 
 > [!NOTE]
 > Claude can only read a certain amount of text at once. A long article might have
@@ -356,7 +356,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is he.decode() and why is it needed?
+### 23. What is he.decode() and why is it needed?
 
 > [!NOTE]
 > After Cheerio extracts text, some characters might still appear as HTML codes —
@@ -373,7 +373,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### Why write logs to stderr and not stdout?
+### 24. Why write logs to stderr and not stdout?
 
 > [!IMPORTANT]
 > The MCP stdio server uses stdout as a communication channel — every line written
@@ -386,7 +386,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is structured logging and why is it better?
+### 25. What is structured logging and why is it better?
 
 > [!NOTE]
 > Instead of plain text like:
@@ -402,7 +402,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What should every error log include?
+### 26. What should every error log include?
 
 > [!IMPORTANT]
 > Every error log needs:
@@ -418,7 +418,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is render.yaml and why does it matter?
+### 27. What is render.yaml and why does it matter?
 
 > [!NOTE]
 > render.yaml tells Render how to deploy your project — build command, start
@@ -430,7 +430,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What is the difference between npm install and npm ci?
+### 28. What is the difference between npm install and npm ci?
 
 > [!NOTE]
 > - **npm install** — figures out which versions to install. May vary slightly between runs.
@@ -442,7 +442,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### Why test across multiple Node.js versions in CI?
+### 29. Why test across multiple Node.js versions in CI?
 
 > [!NOTE]
 > Node.js updates its JavaScript engine regularly. Code that works in Node 18 might
@@ -459,7 +459,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### Why must API keys never be in code or git history?
+### 30. Why must API keys never be in code or git history?
 
 > [!CAUTION]
 > Once something is committed to git, it stays in history forever — even if you
@@ -472,7 +472,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### Why validate user input before using it?
+### 31. Why validate user input before using it?
 
 > [!NOTE]
 > Data from outside your system — user requests, API responses, form inputs —
@@ -489,7 +489,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### What should you never include in an API error response?
+### 32. What should you never include in an API error response?
 
 > [!CAUTION]
 > Never expose to users:
@@ -508,7 +508,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### 1. Where do you start when building an AI-powered server?
+### 33. Where do you start when building an AI-powered server?
 
 > [!TIP]
 > Start from the inside out, not the outside in.
@@ -528,7 +528,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### 2. What is the first thing to build when starting a TypeScript project?
+### 34. What is the first thing to build when starting a TypeScript project?
 
 > [!IMPORTANT]
 > Set up TypeScript strictly before writing a single line of real code:
@@ -547,7 +547,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### 3. How do you build a utility layer that every tool can share?
+### 35. How do you build a utility layer that every tool can share?
 
 > [!NOTE]
 > A utility is something that has no opinion about what you are building —
@@ -565,7 +565,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### 4. How do you design a tool function?
+### 36. How do you design a tool function?
 
 > [!NOTE]
 > Every tool in this project follows the same pattern:
@@ -580,7 +580,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### 5. How do you prompt Claude effectively?
+### 37. How do you prompt Claude effectively?
 
 > [!NOTE]
 > Treat your prompt like a job description. The clearer you describe the role, the task,
@@ -608,7 +608,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### 6. How do you handle the case where an external API is slow or down?
+### 38. How do you handle the case where an external API is slow or down?
 
 > [!NOTE]
 > There are three kinds of failure:
@@ -631,7 +631,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### 7. What order should you test things as you build?
+### 39. What order should you test things as you build?
 
 > [!TIP]
 > Test the smallest piece first, then build outward:
@@ -651,7 +651,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### 8. How do you structure error handling across a whole project?
+### 40. How do you structure error handling across a whole project?
 
 > [!NOTE]
 > Think of error handling in three zones:
@@ -674,7 +674,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### 9. How do you know when your architecture is too complicated?
+### 41. How do you know when your architecture is too complicated?
 
 > [!TIP]
 > This project follows one rule: **add complexity only when the simple version breaks.**
@@ -693,7 +693,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### 10. What does a good development loop look like day-to-day?
+### 42. What does a good development loop look like day-to-day?
 
 > [!TIP]
 > We followed this cycle for every feature:
@@ -715,7 +715,7 @@ structuredContent is the data record saved in the accounting system.
 
 ---
 
-### 11. What are the most important things to get right from day one?
+### 43. What are the most important things to get right from day one?
 
 > [!IMPORTANT]
 > Five things that cost a lot to retrofit but are free if you start with them:
